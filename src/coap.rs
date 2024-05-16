@@ -12,8 +12,6 @@ use hal::prelude::_embedded_hal_digital_v2_OutputPin;
 use serde::{Deserialize, Serialize};
 use smoltcp::wire::IpAddress;
 
-use crate::utils::init_wifi;
-
 #[derive(Serialize, Deserialize, Clone)]
 pub struct LightState {
 	pub is_on: bool,
@@ -39,7 +37,7 @@ impl<'a, 'b> CoapClient<'a, 'b> {
 		msg_id: u16,
 	) -> Self {
 		Self {
-			socket: socket,
+			socket,
 			msg_id,
 			token: 0,
 			ip,
@@ -65,55 +63,35 @@ impl<'a, 'b> CoapClient<'a, 'b> {
 		//let mut dac1 = dac::DAC1::dac(analog.dac1, pin25).unwrap();
 
 		let mut wait_end = current_millis() + timeout * 1000;
-		let mut read_bytes = 0;
-		let mut message_bytes: Vec<u8> = vec![];
 		loop {
 			// println!("{}", ALLOCATOR.free());
-			self.socket.work();
-			let mut receive_buffer: [u8; 512] = [0; 512];
-			//println!("Working the socket");
-			let receive_data = self.socket.receive(&mut receive_buffer);
-			// Wait to receive entire packet and save it in message_bytes
-			if receive_data.is_ok() {
-				let receive_data = receive_data.unwrap();
-				read_bytes += 512;
-				message_bytes.extend_from_slice(&receive_buffer);
-				//I have no idea why printing this fixes everything
-				println!("{}:{}", read_bytes, receive_data.0);
-				if read_bytes > receive_data.0 {
-					message_bytes = message_bytes[0..receive_data.0].to_vec();
-					let resp = coap_lite::Packet::from_bytes(&message_bytes);
-					if resp.is_ok() {
-						let resp = resp.unwrap();
-						println!("Handling observe");
-						let payload = String::from_utf8(resp.clone().payload).unwrap();
-						let device_state: LightState = serde_json::from_str(&payload).unwrap();
-						//dac1.write(device_state.brightness);
 
-						if device_state.is_on {
-							self.pin.set_high().unwrap();
-						} else {
-							self.pin.set_low().unwrap();
-						}
-						println!("{}", payload);
-						//let device_state: LightState = serde_json::from_str(&payload).unwrap();
-						// if (device_state.is_on) {
-						// 	let mut led = io.pins.gpio2.into_push_pull_output();
+			let resp = self.receive(timeout);
+			if resp.is_ok() {
+				let resp = resp.unwrap();
+				println!("Handling observe");
+				let payload = String::from_utf8(resp.clone().payload).unwrap();
+				let device_state: LightState = serde_json::from_str(&payload).unwrap();
+				//dac1.write(device_state.brightness);
 
-						// 	led.set_high().unwrap();
-						// }
-						self.handle_response(resp);
-						read_bytes = 0;
-						message_bytes = Vec::new();
-						wait_end = current_millis() + timeout * 1000;
-						let is_connected = self.controller.is_connected().unwrap();
-						println!("{}", is_connected);
-					} else {
-						println!("Conversion from bytes to packet failed");
-					}
+				if device_state.is_on {
+					self.pin.set_high().unwrap();
+				} else {
+					self.pin.set_low().unwrap();
 				}
+				println!("{}", payload);
+				//let device_state: LightState = serde_json::from_str(&payload).unwrap();
+				// if (device_state.is_on) {
+				// 	let mut led = io.pins.gpio2.into_push_pull_output();
+
+				// 	led.set_high().unwrap();
+				// }
+				self.handle_response(resp);
+				wait_end = current_millis() + timeout * 1000;
+				let is_connected = self.controller.is_connected().unwrap();
+				println!("{}", is_connected);
 			} else {
-				// println!("Nothing to read");
+				println!("{}", resp.unwrap_err().to_string());
 			}
 			if current_millis() > wait_end {
 				println!("Timeout");
@@ -231,10 +209,6 @@ impl<'a, 'b> CoapClient<'a, 'b> {
 		}
 		let resp = self.receive(5).unwrap();
 		println!("Returned: {:?}", resp);
-		// self.socket.close();
-		// self.socket.bind(6969);
-		// loop {
 		self.observe(10 /*pin25, analog*/);
-		// }
 	}
 }
