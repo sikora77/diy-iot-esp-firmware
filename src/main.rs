@@ -2,24 +2,27 @@
 #![no_main]
 extern crate alloc;
 
+use core::mem::MaybeUninit;
+
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use embedded_svc::wifi::Wifi;
 use esp_backtrace as _;
+
+use anyhow::anyhow;
+use esp_hal::analog::dac::DAC1;
+use esp_hal::clock::{ClockControl, CpuClock};
+use esp_hal::gpio::IO;
+use esp_hal::rng::Rng;
+use esp_hal::{peripherals::Peripherals, prelude::*};
 use esp_println::logger::init_logger;
 use esp_println::println;
 use esp_wifi::wifi::utils::create_network_interface;
-use esp_wifi::wifi::WifiMode;
+use esp_wifi::wifi::WifiStaDevice;
 use esp_wifi::wifi_interface::WifiStack;
 use esp_wifi::{current_millis, initialize, EspWifiInitFor};
-use hal::clock::{ClockControl, CpuClock};
-use hal::gpio::IO;
-use hal::timer::TimerGroup;
-use hal::Rng;
-use hal::{peripherals::Peripherals, prelude::*, Rtc};
+use serde::{Deserialize, Serialize};
 use smoltcp::iface::SocketStorage;
-use smoltcp::socket::udp::PacketMetadata;
 use smoltcp::wire::{IpAddress, Ipv4Address};
 
 use crate::utils::init_wifi;
@@ -28,21 +31,27 @@ mod coap;
 mod utils;
 
 const SSID: &str = "HALNy-2.4G-0a3b62";
+// const SSID: &str = "2.4G-dzCr";
+// const SSID: &str = "Redmi Note 9 Pro";
 const PASSWORD: &str = "$paroladordine";
-const IP: &str = core::env!("IP");
+// const PASSWORD: &str = "bVztpcdj";
+// const PASSWORD: &str = "serwis15";
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct LightState {
+	pub is_on: bool,
+	pub brightness: u8,
+	pub color: i32,
+}
 
 #[global_allocator]
 static ALLOCATOR: esp_alloc::EspHeap = esp_alloc::EspHeap::empty();
 
 fn init_heap() {
-	const HEAP_SIZE: usize = 2 * 1024;
-
-	extern "C" {
-		static mut _heap_start: u32;
-	}
+	const HEAP_SIZE: usize = 32 * 1024;
+	static mut HEAP: MaybeUninit<[u8; HEAP_SIZE]> = MaybeUninit::uninit();
 	unsafe {
-		let heap_start = &_heap_start as *const _ as usize;
-		ALLOCATOR.init(heap_start as *mut u8, HEAP_SIZE);
+		ALLOCATOR.init(HEAP.as_mut_ptr() as *mut u8, HEAP_SIZE);
 	}
 }
 
@@ -56,7 +65,7 @@ fn actual_ip(ip: &str) -> [u8; 4] {
 				}
 				Ok(x) => x,
 			};
-			return data;
+			data
 		})
 		.collect();
 	vec.as_slice().try_into().unwrap()
@@ -64,6 +73,11 @@ fn actual_ip(ip: &str) -> [u8; 4] {
 
 #[entry]
 fn main() -> ! {
+	let IP: &str = core::env!("IP");
+	let port: u16 = core::env!("PORT")
+		.parse::<u16>()
+		.expect("PORT is not a valid port");
+	println!("{}", port);
 	init_heap();
 	init_logger(log::LevelFilter::Info);
 
@@ -72,13 +86,13 @@ fn main() -> ! {
 	// Initializing peripherals and clocks
 	let peripherals = Peripherals::take();
 
-	let system = peripherals.DPORT.split();
-	let mut peripheral_clock_control = system.peripheral_clock_control;
+	let system = peripherals.SYSTEM.split();
+	// let mut peripheral_clock_control = system.peripheral_clock_control;
 	let clocks = ClockControl::configure(system.clock_control, CpuClock::Clock240MHz).freeze();
-	let mut rtc = Rtc::new(peripherals.RTC_CNTL);
-	rtc.rwdt.disable();
+	// let mut rtc = Rtc::new(peripherals.RTC_CNTL);
+	// rtc.rwdt.disable();
 
-	let timer = TimerGroup::new(peripherals.TIMG1, &clocks, &mut peripheral_clock_control).timer0;
+	let timer = esp_hal::timer::TimerGroup::new(peripherals.TIMG1, &clocks, None).timer0;
 
 	// Initializing wifi
 	let mut rng = Rng::new(peripherals.RNG);
@@ -91,33 +105,37 @@ fn main() -> ! {
 	)
 	.unwrap();
 
-	let (wifi, _) = peripherals.RADIO.split();
+	let wifi = peripherals.WIFI;
 	let mut socket_set_entries: [SocketStorage; 3] = Default::default();
 	let (iface, device, mut controller, sockets) =
-		create_network_interface(&init, wifi, WifiMode::Sta, &mut socket_set_entries).unwrap();
+		create_network_interface(&init, wifi, WifiStaDevice, socket_set_entries.as_mut()).unwrap();
 	let wifi_stack = WifiStack::new(iface, device, sockets, current_millis);
 	let io = IO::new(peripherals.GPIO, peripherals.IO_MUX);
-	let analog = peripherals.SENS.split();
-	let pin25 = io.pins.gpio25.into_analog();
-	let mut led = io.pins.gpio2.into_push_pull_output();
+	let led = io.pins.gpio2.into_push_pull_output();
+
+	let analog_pin = io.pins.gpio25.into_analog();
+	let mut dac1 = DAC1::new(peripherals.DAC1, analog_pin);
+	let mut dac1_ref = &mut dac1;
 	init_wifi(SSID, PASSWORD, &mut controller, &wifi_stack);
 
 	println!("Start busy loop on main");
 
 	let mut rx_udp_buffer = [0u8; 1536];
 	let mut tx_udp_buffer = [0u8; 1536];
-	let mut rx_meta = [PacketMetadata::EMPTY];
-	let mut tx_meta = [PacketMetadata::EMPTY];
+	let mut rx_meta = [smoltcp::socket::udp::PacketMetadata::EMPTY; 4];
+	let mut tx_meta = [smoltcp::socket::udp::PacketMetadata::EMPTY; 4];
 	let mut udp_socket = wifi_stack.get_udp_socket(
-		&mut rx_meta,
+		rx_meta.as_mut(),
 		&mut rx_udp_buffer,
-		&mut tx_meta,
+		tx_meta.as_mut(),
 		&mut tx_udp_buffer,
 	);
-	let mut msg_id: u16 = 100;
-	let mut token: u8 = 0;
+	let _msg_id: u16 = 100;
+	let _token: u8 = 0;
 	//let mut socket = wifi_stack.get_socket(&mut rx_buffer, &mut tx_buffer);
-	let err = udp_socket.bind(6969);
+	let socket_port = u16::try_from(rng.random() % 10000).unwrap();
+	println!("Port on ESP: {}", socket_port);
+	let err = udp_socket.bind(socket_port);
 	if err.is_err() {
 		println!("IoError");
 	}
@@ -129,49 +147,54 @@ fn main() -> ! {
 			ip_address[2],
 			ip_address[3],
 		)),
-		led,
-		&controller,
-		rng.random() as u16,
+		port,
 	);
 
-	coapClient.make_observe_request(
-		"lights/33f808df-e9bf-4001-b364-d129d20993ed",
-		true,
-		// pin25,
-		// analog,
-	);
-	let mut read_bytes = 0;
-	let mut message_bytes: Vec<u8> = Vec::new();
-	// We never get to this point
+	let observe_callback = &mut |payload| {
+		let payload = String::from_utf8(payload);
+		if payload.is_err() {
+			// TODO handle errors
+			return Err(anyhow!("Invalid payload ( failed to convert from utf8 )"));
+		}
+		let payload = payload.unwrap();
+		let device_state: Result<LightState, serde_json::Error> = serde_json::from_str(&payload);
+		if device_state.is_err() {
+			return Err(anyhow!("Invalid payload (failed conversion from json)"));
+		}
+		let device_state = device_state.unwrap();
+
+		if device_state.is_on {
+			// if cfg!(debug_assertions) {
+			// led.set_high();
+			// }
+			dac1_ref.write(device_state.brightness);
+		} else {
+			dac1_ref.write(0);
+			// if cfg!(debug_assertions) {
+			// led.set_low();
+			// }
+		}
+		println!("{}", payload);
+		return Ok(());
+	};
+
 	loop {
+		println!("{}", controller.is_connected().unwrap());
 		println!("Making Coap request");
 		coapClient.make_observe_request(
 			"lights/33f808df-e9bf-4001-b364-d129d20993ed",
 			true,
-			// 	pin25,
-			// 	analog,
+			observe_callback,
 		);
-		println!("{}", controller.is_connected().unwrap());
-		coapClient.socket.work();
-
-		let mut receive_buffer: [u8; 64] = [0; 64];
-		match coapClient.socket.receive(&mut receive_buffer) {
-			Ok(x) => {
-				read_bytes += 64;
-				message_bytes.extend_from_slice(&receive_buffer);
-				if read_bytes >= x.0 {
-					let resp = coap_lite::Packet::from_bytes(&message_bytes);
-					println!("{:?}", String::from_utf8(resp.unwrap().payload));
+		match controller.is_connected() {
+			Ok(is_connected) => {
+				if !is_connected {
+					controller.connect();
 				}
 			}
 			Err(err) => {
-				println!("error");
+				println!("Error ");
 			}
-		}
-
-		let wait_end = current_millis() + 5 * 1000;
-		while current_millis() < wait_end {
-			coapClient.socket.work();
-		}
+		};
 	}
 }

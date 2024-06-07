@@ -1,20 +1,20 @@
-use embedded_svc::ipv4::Interface;
-use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi};
+// use embedded_svc::ipv4::Interface;
+// use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi};
 
 use esp_backtrace as _;
 use esp_println::println;
-use esp_wifi::wifi::WifiController;
+use esp_wifi::wifi::{ClientConfiguration, Configuration, WifiController, WifiStaDevice};
 use esp_wifi::wifi_interface::WifiStack;
 
 pub fn init_wifi(
 	ssid: &str,
 	password: &str,
 	controller: &mut WifiController,
-	wifi_stack: &WifiStack,
+	wifi_stack: &WifiStack<WifiStaDevice>,
 ) {
 	let client_config = Configuration::Client(ClientConfiguration {
-		ssid: ssid.into(),
-		password: password.into(),
+		ssid: ssid.try_into().unwrap(),
+		password: password.try_into().unwrap(),
 		..Default::default()
 	});
 	let res = controller.set_configuration(&client_config);

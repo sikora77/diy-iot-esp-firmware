@@ -1,0 +1,30 @@
+{
+	// See https://go.microsoft.com/fwlink/?LinkId=733558
+	// for the documentation about the tasks.json format
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Set env",
+			"type": "shell",
+			"command": "source",
+			"args": ["~/export-esp.sh"]
+		},
+		{
+			"label": "Rust espflash",
+			"type": "shell",
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+			"command": "cargo",
+			"args": ["espflash", "flash", "--monitor", "--release"],
+			"options": {
+				"env": { "IP": "65.21.130.122", "PORT": "32070" },
+				"shell": {
+					"executable": "zsh",
+					"args": ["-c", "source ~/export-esp.sh"]
+				}
+			}
+		}
+	]
+}

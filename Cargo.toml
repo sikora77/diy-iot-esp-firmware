@@ -6,7 +6,7 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-hal = { package = "esp32-hal", version = "0.14.0" }
+esp-hal = { version = "0.17.0", default-features = false }
 esp-backtrace = { version = "0.7.0", features = [
     "esp32",
     "panic-handler",
@@ -20,7 +20,7 @@ heapless = { version = "0.7.16", default-features = false }
 embedded-svc = { version = "0.25.1", default-features = false, features = [] }
 embedded-io = "0.4.0"
 log = "0.4.18"
-smoltcp = { version = "0.10.0", default-features = false, features = [
+smoltcp = { version = "0.11.0", default-features = false, features = [
     "proto-igmp",
     "proto-ipv4",
     "proto-dns",
@@ -41,14 +41,14 @@ serde = { version = "1.0", default-features = false, features = [
     "derive",
     "alloc",
 ] }
-[dependencies.esp-wifi]
-git = "https://github.com/esp-rs/esp-wifi.git"
-
-# `esp-wifi` is in active development. It is often a good idea to lock it to a specific commit
-rev = "6b53683586e29bcec7af23309d788fed4fb49f2c"
-
-# A supported chip needs to be specified, as well as specific use-case features 
-features = ["esp32", "wifi", "esp-now", "ps-min-modem", "wifi-logs"]
+esp-wifi = { version = "0.5.1", features = [
+    "esp32",
+    "wifi-default",
+    "esp-now",
+    "ps-min-modem",
+    "wifi-logs",
+    "udp","dns",
+] }
 
 [profile.dev.package.esp-wifi]
 opt-level = 3

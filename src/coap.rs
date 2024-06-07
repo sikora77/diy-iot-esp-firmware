@@ -1,48 +1,28 @@
-use alloc::string::String;
 use alloc::vec::Vec;
 use alloc::{string::ToString, vec};
 use anyhow::anyhow;
 use coap_lite::{CoapOption, ContentFormat, MessageClass, MessageType, Packet, RequestType};
-use embedded_svc::wifi::Wifi;
 use esp_println::println;
-use esp_wifi::wifi::WifiController;
+use esp_wifi::wifi::WifiDeviceMode;
 use esp_wifi::{current_millis, wifi_interface::UdpSocket};
-use hal::gpio::{GpioPin, Output, PushPull};
-use hal::prelude::_embedded_hal_digital_v2_OutputPin;
-use serde::{Deserialize, Serialize};
 use smoltcp::wire::IpAddress;
 
-#[derive(Serialize, Deserialize, Clone)]
-pub struct LightState {
-	pub is_on: bool,
-	pub brightness: u8,
-	pub color: i32,
-}
-
-pub struct CoapClient<'a, 'b> {
-	pub socket: UdpSocket<'a, 'b>,
+pub struct CoapClient<'a, 'b, MODE: WifiDeviceMode> {
+	pub socket: UdpSocket<'a, 'b, MODE>,
 	msg_id: u16,
 	token: u8,
 	ip: IpAddress,
-	pin: GpioPin<Output<PushPull>, 2>,
-	controller: &'b WifiController<'b>,
+	port: u16,
 }
 
-impl<'a, 'b> CoapClient<'a, 'b> {
-	pub fn new(
-		socket: UdpSocket<'a, 'b>,
-		ip: IpAddress,
-		pin: GpioPin<Output<PushPull>, 2>,
-		controller: &'b WifiController,
-		msg_id: u16,
-	) -> Self {
+impl<'a, 'b, MODE: WifiDeviceMode> CoapClient<'a, 'b, MODE> {
+	pub fn new(socket: UdpSocket<'a, 'b, MODE>, ip: IpAddress, port: u16) -> Self {
 		Self {
 			socket,
-			msg_id,
+			msg_id: 0,
 			token: 0,
 			ip,
-			pin,
-			controller,
+			port,
 		}
 	}
 	fn handle_response(&mut self, resp: Packet) {
@@ -51,53 +31,8 @@ impl<'a, 'b> CoapClient<'a, 'b> {
 		packet.set_token(resp.get_token().to_vec());
 		packet.header.code = MessageClass::Empty;
 		packet.header.message_id = resp.header.message_id;
-		self.socket.send(self.ip, 5683, &packet.to_bytes().unwrap());
-		self.socket.work();
-	}
-	fn observe(
-		&mut self,
-		timeout: u64, /* , pin25: GpioPin<Analog, 25>, analog: AvailableAnalog*/
-	) {
-		println!("Observing");
-
-		//let mut dac1 = dac::DAC1::dac(analog.dac1, pin25).unwrap();
-
-		let mut wait_end = current_millis() + timeout * 1000;
-		loop {
-			// println!("{}", ALLOCATOR.free());
-
-			let resp = self.receive(timeout);
-			if resp.is_ok() {
-				let resp = resp.unwrap();
-				println!("Handling observe");
-				let payload = String::from_utf8(resp.clone().payload).unwrap();
-				let device_state: LightState = serde_json::from_str(&payload).unwrap();
-				//dac1.write(device_state.brightness);
-
-				if device_state.is_on {
-					self.pin.set_high().unwrap();
-				} else {
-					self.pin.set_low().unwrap();
-				}
-				println!("{}", payload);
-				//let device_state: LightState = serde_json::from_str(&payload).unwrap();
-				// if (device_state.is_on) {
-				// 	let mut led = io.pins.gpio2.into_push_pull_output();
-
-				// 	led.set_high().unwrap();
-				// }
-				self.handle_response(resp);
-				wait_end = current_millis() + timeout * 1000;
-				let is_connected = self.controller.is_connected().unwrap();
-				println!("{}", is_connected);
-			} else {
-				println!("{}", resp.unwrap_err().to_string());
-			}
-			if current_millis() > wait_end {
-				println!("Timeout");
-				break;
-			}
-		}
+		self.socket
+			.send(self.ip, self.port, &packet.to_bytes().unwrap());
 	}
 
 	// Receive packets
@@ -105,10 +40,10 @@ impl<'a, 'b> CoapClient<'a, 'b> {
 		let wait_end = current_millis() + timeout * 1000;
 		let mut read_bytes = 0;
 		let mut message_bytes: Vec<u8> = vec![];
+		self.socket.work();
+		// delay.delay_millis(1000);
 		println!("receiving");
-
 		loop {
-			self.socket.work();
 			let mut receive_buffer: [u8; 512] = [0; 512];
 			let receive_data = self.socket.receive(&mut receive_buffer);
 			// Wait to receive entire packet and save it in message_bytes
@@ -125,90 +60,117 @@ impl<'a, 'b> CoapClient<'a, 'b> {
 					}
 					return Err(anyhow::Error::msg("Conversion from bytes to packet failed"));
 				}
+			} else {
+				let err = receive_data.unwrap_err();
+				// println!("{:?}", err);
+				// return Err(anyhow!("UDP error"));
 			}
 			if current_millis() > wait_end {
-				anyhow!("Timeout");
+				println!("Timeout");
+				return Err(anyhow!("Timeout"));
 			}
 		}
+	}
+	fn create_get_packet(
+		&mut self,
+		uri_path: &str,
+		is_confirmable: bool,
+		add_to_token: bool,
+		observable: bool,
+	) -> Packet {
+		let mut packet = coap_lite::Packet::new();
+		match is_confirmable {
+			true => {
+				packet.header.set_type(MessageType::Confirmable);
+			}
+			false => packet.header.set_type(MessageType::NonConfirmable),
+		}
+		packet.set_token(vec![self.token]);
+		if add_to_token {
+			self.token = self.token.wrapping_add(1);
+		}
+		packet.header.message_id = self.msg_id;
+		self.msg_id = self.msg_id.wrapping_add(1);
+		packet.header.code = MessageClass::Request(RequestType::Get);
+		if observable {
+			packet.add_option(CoapOption::Observe, vec![0]);
+		}
+		packet.set_content_format(ContentFormat::TextPlain);
+		uri_path.split('/').for_each(|x| {
+			packet.add_option(CoapOption::UriPath, x.to_string().into_bytes());
+		});
+		packet
 	}
 	pub fn make_get_request(
 		&mut self,
 		uri_path: &str,
 		is_confirmable: bool,
+		add_to_token: bool,
+		observable: bool,
 	) -> Result<Packet, anyhow::Error> {
-		let mut packet = coap_lite::Packet::new();
-		match is_confirmable {
-			true => {
-				packet.header.set_type(MessageType::Confirmable);
-			}
-			false => packet.header.set_type(MessageType::NonConfirmable),
-		}
-		packet.set_token(vec![self.token]);
-		self.token = self.token.wrapping_add(1);
-		packet.header.message_id = self.msg_id;
-		self.msg_id = self.msg_id.wrapping_add(1);
-		packet.header.code = MessageClass::Request(RequestType::Get);
-		packet.set_content_format(ContentFormat::TextPlain);
-		uri_path.split("/").for_each(|x| {
-			packet.add_option(CoapOption::UriPath, x.to_string().into_bytes());
-		});
+		let packet = self.create_get_packet(uri_path, is_confirmable, add_to_token, observable);
 
 		let packet_bytes = packet.to_bytes();
 		if packet_bytes.is_err() {
-			anyhow!("error creating coap packet");
+			return Err(anyhow!("error creating coap packet"));
 		} else {
 			let result = self
 				.socket
-				.send(self.ip, 5683, &packet.to_bytes().unwrap())
+				.send(self.ip, self.port, &packet.to_bytes().unwrap())
 				.is_ok();
 			if !result {
-				anyhow!("error sending packet");
+				return Err(anyhow!("error sending packet"));
 			}
 		}
 		println!("Request sent");
 		self.socket.work();
-		return self.receive(5);
+		self.msg_id += 1;
+		self.receive(5)
 	}
-	pub fn make_observe_request(
+
+	pub fn make_observe_request<F: FnMut(Vec<u8>) -> Result<(), anyhow::Error>>(
 		&mut self,
 		uri_path: &str,
 		is_confirmable: bool,
-		/*pin25: GpioPin<Analog, 25>,
-		analog: AvailableAnalog,*/
+		response_callback: &mut F,
 	) {
-		let mut packet = coap_lite::Packet::new();
-		match is_confirmable {
-			true => {
-				packet.header.set_type(MessageType::Confirmable);
-			}
-			false => packet.header.set_type(MessageType::NonConfirmable),
+		let mut resp = self.make_get_request(uri_path, is_confirmable, true, true);
+		if resp.is_err() {
+			println!("{:?}", resp.unwrap_err());
 		}
-		packet.set_token(vec![self.token]);
-		//self.token = self.token.wrapping_add(1);
-		packet.header.message_id = self.msg_id;
-		self.msg_id = self.msg_id.wrapping_add(1);
-		packet.header.code = MessageClass::Request(RequestType::Get);
-		packet.add_option(CoapOption::Observe, vec![0]);
-		packet.set_content_format(ContentFormat::TextPlain);
-		uri_path.split("/").for_each(|x| {
-			packet.add_option(CoapOption::UriPath, x.to_string().into_bytes());
-		});
+		self.observe(10, response_callback);
+	}
 
-		let packet_bytes = packet.to_bytes();
-		//request.set_path("lights/33f808df-e9bf-4001-b364-d129d20993ed");
-		if packet_bytes.is_err() {
-			println!("error creating coap packet");
-		} else {
-			let result = self
-				.socket
-				.send(self.ip, 5683, &packet.to_bytes().unwrap())
-				.is_ok();
-			if !result {
-				println!("error sending packet");
+	fn observe<F: FnMut(Vec<u8>) -> Result<(), anyhow::Error>>(
+		&mut self,
+		timeout: u64,
+		mut response_callback: F,
+	) -> Result<(), anyhow::Error> {
+		println!("Observing");
+		let mut wait_end = current_millis() + timeout * 1000;
+		loop {
+			let resp = self.receive(timeout);
+			if resp.is_ok() {
+				let resp = resp.unwrap();
+				println!("Handling observe");
+				let callback_error = response_callback(resp.payload.clone());
+				if callback_error.is_err() {
+					return callback_error;
+				}
+				self.handle_response(resp);
+				self.msg_id += 1;
+
+				wait_end = current_millis() + timeout * 1000;
+			// let is_connected = self.controller.is_connected().unwrap();
+			// println!("{}", is_connected);
+			} else {
+				println!("{}", resp.unwrap_err().to_string());
+			}
+			if current_millis() > wait_end {
+				println!("Timeout");
+				break;
 			}
 		}
-		let resp = self.receive(5).unwrap();
-		println!("Returned: {:?}", resp);
-		self.observe(10 /*pin25, analog*/);
+		Ok(())
 	}
 }
