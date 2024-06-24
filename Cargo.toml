@@ -33,6 +33,7 @@ smoltcp = { version = "0.11.0", default-features = false, features = [
     "socket-raw",
     "socket-dhcpv4",
 ] }
+bleps={ git = "https://github.com/bjoernQ/bleps", package = "bleps", rev = "a5148d8ae679e021b78f53fd33afb8bb35d0b62e", features = [ "macros", "async"] }
 anyhow = { version = "1.0.75", default-features = false }
 serde_json = { version = "1.0.105", default-features = false, features = [
     "alloc",
@@ -43,13 +44,15 @@ serde = { version = "1.0", default-features = false, features = [
 ] }
 esp-wifi = { version = "0.5.1", features = [
     "esp32",
-    "wifi-default",
+    "wifi-default","ble","utils",
     "esp-now",
     "ps-min-modem",
-    "wifi-logs",
-    "udp","dns",
+    "udp","dns","coex"
 ] }
 
+esp-storage = { version="0.3.0",features = ["esp32"] }
+
+embedded-storage = "0.3.1"
 [profile.dev.package.esp-wifi]
 opt-level = 3
 
@@ -57,3 +60,5 @@ opt-level = 3
 lto = "off"
 [profile.release]
 lto = "off"
+[profile.dev.package.esp-storage]
+opt-level = 3
