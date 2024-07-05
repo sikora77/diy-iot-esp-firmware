@@ -35,13 +35,13 @@ pub fn init_advertising(mut hci: HciConnector<BleConnector>, mut fs: &mut FlashS
     ).unwrap();
     ble.cmd_set_le_advertise_enable(true).unwrap();
     println!("Started advertising");
-    let mut read_id = |_offset: usize, mut data: &mut [u8]| {
-        println!("{}", crate::DEVICE_ID.len());
+    let mut read_id = |offset: usize, mut data: &mut [u8]| {
         let id_bytes = crate::DEVICE_ID.as_bytes();
-        data.write(&id_bytes).unwrap();
-        crate::DEVICE_ID.len()
+        // Need to write from offset to end, sometimes we can't transmit the entire message
+        data.write(&id_bytes[offset..]).unwrap();
+        crate::DEVICE_ID.len() - offset
     };
-    let write_wifi_ssid = |offset: usize, data: &[u8]| {
+    let mut write_wifi_ssid = |offset: usize, data: &[u8]| {
         println!("RECEIVED SSID: {} {:?}", offset, match data.as_ascii() {
             Some(str_data) => Some(str_data.as_str()),
             None => None
@@ -62,7 +62,7 @@ pub fn init_advertising(mut hci: HciConnector<BleConnector>, mut fs: &mut FlashS
         // println!("{:?}", buf);
     };
 
-    let write_wifi_password = |offset: usize, data: &[u8]| {
+    let mut write_wifi_password = |offset: usize, data: &[u8]| {
         println!("RECEIVED PASSWORD: {} {:?}", offset, match data.as_ascii() {
             Some(str_data) => Some(str_data.as_str()),
             None => None
@@ -79,10 +79,10 @@ pub fn init_advertising(mut hci: HciConnector<BleConnector>, mut fs: &mut FlashS
         // println!("{:?}", buf);
     };
 
-    let mut read_secret = |_offset: usize, mut data: &mut [u8]| {
+    let mut read_secret = |offset: usize, mut data: &mut [u8]| {
         let hello = &b"Hola!"[..];
         data.write(hello).unwrap();
-        30
+        30 - offset
     };
     let mut wf3 = |offset: usize, data: &[u8]| {
         println!("RECEIVED: Offset {}, data {:?}", offset, data);
