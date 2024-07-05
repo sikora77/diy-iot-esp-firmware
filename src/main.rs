@@ -104,6 +104,14 @@ fn actual_ip(ip: &str) -> [u8; 4] {
 #[entry]
 fn main() -> ! {
     let IP: &str = core::env!("IP");
+    let is_configured = match core::option_env!("IS_CONFIGURED") {
+        Some(val) => val.parse::<bool>().expect("Invalid IS_CONFIGURED value"),
+        None => false,
+    };
+    let DEBUG: bool = match core::option_env!("DEBUG") {
+        Some(val) => val.parse::<bool>().expect("Invalid DEBUG value"),
+        None => false
+    };
     let port: u16 = core::env!("PORT")
         .parse::<u16>()
         .expect("PORT is not a valid port");
@@ -156,10 +164,9 @@ fn main() -> ! {
     let io = Io::new(peripherals.GPIO, peripherals.IO_MUX);
 
     let analog_pin = io.pins.gpio25;
-    let mut digital_pin = Output::new(io.pins.gpio2, Level::High);
+    let mut digital_pin = Output::new(io.pins.gpio2, Level::Low);
     let mut dac1 = Dac1::new(peripherals.DAC1, analog_pin);
     let mut dac1_ref = &mut dac1;
-    let is_configured = true;
     init_wifi(SSID, PASSWORD, &mut controller, &wifi_stack);
     if !is_configured {
         let mut bluetooth = peripherals.BT;
@@ -220,7 +227,9 @@ fn main() -> ! {
             // led.set_high();
             // }
             dac1_ref.write(device_state.brightness);
-            digital_pin.set_high();
+            if DEBUG {
+                digital_pin.set_high();
+            }
         } else {
             dac1_ref.write(0);
             digital_pin.set_low();
