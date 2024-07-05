@@ -35,6 +35,7 @@ pub fn init_advertising(mut hci: HciConnector<BleConnector>, mut fs: &mut FlashS
     ).unwrap();
     ble.cmd_set_le_advertise_enable(true).unwrap();
     println!("Started advertising");
+
     let mut read_id = |offset: usize, mut data: &mut [u8]| {
         let id_bytes = crate::DEVICE_ID.as_bytes();
         // Need to write from offset to end, sometimes we can't transmit the entire message
@@ -46,20 +47,6 @@ pub fn init_advertising(mut hci: HciConnector<BleConnector>, mut fs: &mut FlashS
             Some(str_data) => Some(str_data.as_str()),
             None => None
         });
-        // let data_len = min(data.len(), 128);
-        // println!("Not done");
-        // match fs.write(FLASH_ADDR, &data[0..data_len]) {
-        //     Ok(_) => { println!("Write ok"); }
-        //     Err(e) => { println!("{:?}", e); }
-        // };
-        // println!("Wrote data");
-        // let mut buf: [u8; 128] = [0u8; 128];
-        // // This reads the SSID
-        // fs.read(FLASH_ADDR, &mut buf).unwrap();
-        // println!("{:?}", buf);
-        // // This reads the password
-        // fs.read(FLASH_ADDR+128, &mut buf).unwrap();
-        // println!("{:?}", buf);
     };
 
     let mut write_wifi_password = |offset: usize, data: &[u8]| {
@@ -67,16 +54,6 @@ pub fn init_advertising(mut hci: HciConnector<BleConnector>, mut fs: &mut FlashS
             Some(str_data) => Some(str_data.as_str()),
             None => None
         });
-        // let mut fs = FlashStorage::new();
-        // let data_len = min(data.len(), 128);
-        // fs.write(128, &data[0..data_len]).unwrap();
-        // let mut buf: [u8; 128] = [0u8; 128];
-        // // This reads the SSID
-        // fs.read(0, &mut buf).unwrap();
-        // println!("{:?}", buf);
-        // // This reads the password
-        // fs.read(128, &mut buf).unwrap();
-        // println!("{:?}", buf);
     };
 
     let mut read_secret = |offset: usize, mut data: &mut [u8]| {
@@ -84,9 +61,7 @@ pub fn init_advertising(mut hci: HciConnector<BleConnector>, mut fs: &mut FlashS
         data.write(hello).unwrap();
         30 - offset
     };
-    let mut wf3 = |offset: usize, data: &[u8]| {
-        println!("RECEIVED: Offset {}, data {:?}", offset, data);
-    };
+
     gatt!([service {
             uuid: "937312e0-2354-11eb-9f10-fbc30a62cf38",
             characteristics: [

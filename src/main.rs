@@ -13,9 +13,8 @@ use esp_backtrace as _;
 
 use anyhow::anyhow;
 use esp_hal::{
-    analog::dac::DAC1,
+    analog::dac::Dac1,
     clock::{ClockControl, CpuClock},
-    gpio::IO,
     rng::Rng,
     peripherals::Peripherals,
     prelude::*,
@@ -47,8 +46,11 @@ use bleps::{
     Ble,
     HciConnector,
 };
+use embedded_io::blocking::Write;
 use esp_storage::FlashStorage;
 use embedded_storage::{ReadStorage, Storage};
+use esp_hal::gpio::{Io, Level, Output};
+use esp_hal::system::SystemControl;
 
 use crate::utils::init_wifi;
 
@@ -56,12 +58,12 @@ mod coap;
 mod utils;
 mod pairing;
 
-const SSID: &str = "HALNy-2.4G-0a3b62";
+const SSID: &str = "HALNy-2.4G-0a3b62_EXT";
 // const SSID: &str = "2.4G-dzCr";
 // const SSID: &str = "Redmi Note 9 Pro";
 const PASSWORD: &str = "$paroladordine";
 const DEVICE_ID: &str = "33f808df-e9bf-4001-b364-d129d20993ed";
-const FLASH_ADDR:u32=0x20000;
+const FLASH_ADDR: u32 = 0x20000;
 // const PASSWORD: &str = "bVztpcdj";
 // const PASSWORD: &str = "serwis15";
 
@@ -107,17 +109,17 @@ fn main() -> ! {
         .expect("PORT is not a valid port");
     init_heap();
     let mut fs = FlashStorage::new();
-    let mut buf:[u8;128]=[0u8;128];
-    let mut write_buf:[u8;5]=[0u8;5];
+    let mut buf: [u8; 128] = [0u8; 128];
+    let mut write_buf: [u8; 5] = [0u8; 5];
     write_buf.copy_from_slice(&b"Hello"[..]);
     // fs.write(FLASH_ADDR,&write_buf);
     // This reads the SSID
-    println!("Cap: {}",fs.capacity());
-    fs.read(FLASH_ADDR,&mut buf).unwrap();
-    println!("{:?}",buf);
+    println!("Cap: {}", fs.capacity());
+    fs.read(FLASH_ADDR, &mut buf).unwrap();
+    println!("{:?}", buf);
     // This reads the password
-    fs.read(FLASH_ADDR+128,&mut buf).unwrap();
-    println!("{:?}",buf);
+    fs.read(FLASH_ADDR + 128, &mut buf).unwrap();
+    println!("{:?}", buf);
     init_logger(log::LevelFilter::Info);
 
     let ip_address = actual_ip(IP);
@@ -125,13 +127,13 @@ fn main() -> ! {
     // Initializing peripherals and clocks
     let peripherals = Peripherals::take();
 
-    let system = peripherals.SYSTEM.split();
+    let system = SystemControl::new(peripherals.SYSTEM);
     // let mut peripheral_clock_control = system.peripheral_clock_control;
-    let clocks = ClockControl::configure(system.clock_control, CpuClock::Clock240MHz).freeze();
+    let clocks = ClockControl::max(system.clock_control).freeze();
     // let mut rtc = Rtc::new(peripherals.RTC_CNTL);
     // rtc.rwdt.disable();
 
-    let timer = esp_hal::timer::TimerGroup::new(peripherals.TIMG1, &clocks, None).timer0;
+    let timer = esp_hal::timer::timg::TimerGroup::new(peripherals.TIMG1, &clocks, None).timer0;
 
     // Initializing wifi
     let mut rng = Rng::new(peripherals.RNG);
@@ -139,33 +141,33 @@ fn main() -> ! {
         EspWifiInitFor::WifiBle,
         timer,
         rng,
-        system.radio_clock_control,
+        peripherals.RADIO_CLK,
         &clocks,
     )
         .unwrap();
 
     let wifi = peripherals.WIFI;
-    let mut bluetooth = peripherals.BT;
 
 
     let mut socket_set_entries: [SocketStorage; 3] = Default::default();
     let (iface, device, mut controller, sockets) =
         create_network_interface(&init, wifi, WifiStaDevice, socket_set_entries.as_mut()).unwrap();
     let wifi_stack = WifiStack::new(iface, device, sockets, current_millis);
-    let io = IO::new(peripherals.GPIO, peripherals.IO_MUX);
-    let led = io.pins.gpio2.into_push_pull_output();
+    let io = Io::new(peripherals.GPIO, peripherals.IO_MUX);
 
-    let analog_pin = io.pins.gpio25.into_analog();
-    let mut dac1 = DAC1::new(peripherals.DAC1, analog_pin);
+    let analog_pin = io.pins.gpio25;
+    let mut digital_pin = Output::new(io.pins.gpio2, Level::High);
+    let mut dac1 = Dac1::new(peripherals.DAC1, analog_pin);
     let mut dac1_ref = &mut dac1;
-    let is_configured = false;
+    let is_configured = true;
     init_wifi(SSID, PASSWORD, &mut controller, &wifi_stack);
     if !is_configured {
+        let mut bluetooth = peripherals.BT;
         controller.stop().unwrap();
         loop {
             let connector = BleConnector::new(&init, &mut bluetooth);
             let hci = HciConnector::new(connector, current_millis);
-            pairing::init_advertising(hci,&mut fs);
+            pairing::init_advertising(hci, &mut fs);
         }
     }
     println!("Start busy loop on main");
@@ -218,8 +220,10 @@ fn main() -> ! {
             // led.set_high();
             // }
             dac1_ref.write(device_state.brightness);
+            digital_pin.set_high();
         } else {
             dac1_ref.write(0);
+            digital_pin.set_low();
             // if cfg!(debug_assertions) {
             // led.set_low();
             // }
