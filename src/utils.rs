@@ -1,6 +1,7 @@
 // use embedded_svc::ipv4::Interface;
 // use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi};
 
+use anyhow::anyhow;
 use esp_backtrace as _;
 use esp_println::println;
 use esp_wifi::wifi::{ClientConfiguration, Configuration, WifiController, WifiStaDevice};
@@ -37,6 +38,7 @@ pub fn init_wifi(
 			}
 			Err(err) => {
 				println!("{:?}", err);
+				loop {}
 			}
 		}
 	}
