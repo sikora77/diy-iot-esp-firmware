@@ -1,7 +1,6 @@
 #![feature(ascii_char)]
 #![no_std]
 #![no_main]
-#![no_std]
 extern crate alloc;
 
 use alloc::format;
@@ -13,23 +12,12 @@ use alloc::vec::Vec;
 use esp_backtrace as _;
 
 use anyhow::anyhow;
-use bleps::{
-	ad_structure::{
-		create_advertising_data, AdStructure, BR_EDR_NOT_SUPPORTED, LE_GENERAL_DISCOVERABLE,
-	},
-	att::Uuid,
-	Ble, HciConnector,
-};
-use embedded_io::blocking::Write;
-use embedded_storage::{ReadStorage, Storage};
+use bleps::HciConnector;
+use embedded_storage::ReadStorage;
 use esp_hal::gpio::{Io, Level, Output};
 use esp_hal::system::SystemControl;
 use esp_hal::{
-	analog::dac::Dac1,
-	clock::{ClockControl, CpuClock},
-	peripherals::Peripherals,
-	prelude::*,
-	rng::Rng,
+	analog::dac::Dac1, clock::ClockControl, peripherals::Peripherals, prelude::*, rng::Rng,
 };
 use esp_println::logger::init_logger;
 use esp_println::println;
@@ -81,14 +69,11 @@ fn init_heap() {
 fn actual_ip(ip: &str) -> [u8; 4] {
 	let vec: Vec<u8> = ip
 		.split('.')
-		.map(|num| {
-			let data = match num.to_string().parse::<u8>() {
-				Err(_) => {
-					panic!("Ip address is wrong");
-				}
-				Ok(x) => x,
-			};
-			data
+		.map(|num| match num.to_string().parse::<u8>() {
+			Err(_) => {
+				panic!("Ip address is wrong");
+			}
+			Ok(x) => x,
 		})
 		.collect();
 	vec.as_slice().try_into().unwrap()
@@ -96,16 +81,16 @@ fn actual_ip(ip: &str) -> [u8; 4] {
 
 #[entry]
 fn main() -> ! {
-	let IP: &str = core::env!("IP");
-	let is_configured = match core::option_env!("IS_CONFIGURED") {
+	let ip_env: &str = core::env!("IP");
+	let is_configured_env = match core::option_env!("IS_CONFIGURED") {
 		Some(val) => val.parse::<bool>().expect("Invalid IS_CONFIGURED value"),
 		None => false,
 	};
-	let DEBUG: bool = match core::option_env!("DEBUG") {
+	let debug_env: bool = match core::option_env!("DEBUG") {
 		Some(val) => val.parse::<bool>().expect("Invalid DEBUG value"),
 		None => false,
 	};
-	let port: u16 = core::env!("PORT")
+	let port_env: u16 = core::env!("PORT")
 		.parse::<u16>()
 		.expect("PORT is not a valid port");
 	init_heap();
@@ -123,7 +108,7 @@ fn main() -> ! {
 	println!("{:?}", buf);
 	init_logger(log::LevelFilter::Info);
 
-	let ip_address = actual_ip(IP);
+	let ip_address = actual_ip(ip_env);
 
 	// Initializing peripherals and clocks
 	let peripherals = Peripherals::take();
@@ -158,9 +143,9 @@ fn main() -> ! {
 	let analog_pin = io.pins.gpio25;
 	let mut digital_pin = Output::new(io.pins.gpio2, Level::Low);
 	let mut dac1 = Dac1::new(peripherals.DAC1, analog_pin);
-	let mut dac1_ref = &mut dac1;
+	let dac1_ref = &mut dac1;
 	init_wifi(SSID, PASSWORD, &mut controller, &wifi_stack);
-	if !is_configured {
+	if !is_configured_env {
 		let mut bluetooth = peripherals.BT;
 		controller.stop().unwrap();
 		loop {
@@ -190,7 +175,7 @@ fn main() -> ! {
 	if err.is_err() {
 		println!("IoError");
 	}
-	let mut coapClient = coap::CoapClient::new(
+	let mut coap_client = coap::CoapClient::new(
 		udp_socket,
 		IpAddress::Ipv4(Ipv4Address::new(
 			ip_address[0],
@@ -198,7 +183,7 @@ fn main() -> ! {
 			ip_address[2],
 			ip_address[3],
 		)),
-		port,
+		port_env,
 	);
 
 	let observe_callback = &mut |payload| {
@@ -219,7 +204,7 @@ fn main() -> ! {
 			// led.set_high();
 			// }
 			dac1_ref.write(device_state.brightness);
-			if DEBUG {
+			if debug_env {
 				digital_pin.set_high();
 			}
 		} else {
@@ -230,21 +215,25 @@ fn main() -> ! {
 			// }
 		}
 		println!("{}", payload);
-		return Ok(());
+		Ok(())
 	};
 
 	loop {
 		println!("{}", controller.is_connected().unwrap());
 		println!("Making Coap request");
-		coapClient.make_observe_request(&format!("lights/{}", DEVICE_ID), true, observe_callback);
+		let _ = coap_client.make_observe_request(
+			&format!("lights/{}", DEVICE_ID),
+			true,
+			observe_callback,
+		);
 		match controller.is_connected() {
 			Ok(is_connected) => {
 				if !is_connected {
-					controller.connect();
+					let _ = controller.connect();
 				}
 			}
 			Err(err) => {
-				println!("Error ");
+				println!("Error: {:?}", err);
 			}
 		};
 	}
