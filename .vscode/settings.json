@@ -1,8 +1,9 @@
 {
 	"rust-analyzer.server.extraEnv": { "RUSTUP_TOOLCHAIN": "esp" },
 	"rust-analyzer.cargo.target": "xtensa-esp32-none-elf",
-	"rust-analyzer.cargo.unsetTest": ["core"],
-	"rust-analyzer.checkOnSave": false,
+	"rust-analyzer.cargo.extraArgs": ["--target", "xtensa-esp32-none-elf"],
+	"rust-analyzer.check.unsetTest": ["core"],
+	"rust-analyzer.checkOnSave": true,
 	"rust-analyzer.check.allTargets": false,
 	"rust-analyzer.check.overrideCommand": [
 		"cargo",

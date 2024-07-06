@@ -5,6 +5,7 @@ authors = ["sikora77 <sikorski.jakubjan@gmail.com>"]
 edition = "2021"
 license = "MIT OR Apache-2.0"
 
+
 [dependencies]
 esp-hal = { version = "0.17.0", default-features = false }
 esp-backtrace = { version = "0.7.0", features = [
@@ -47,7 +48,8 @@ esp-wifi = { version = "0.5.1", features = [
     "esp-now",
     "ps-min-modem",
     "wifi-logs",
-    "udp","dns",
+    "udp",
+    "dns",
 ] }
 
 [profile.dev.package.esp-wifi]

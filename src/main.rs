@@ -1,5 +1,5 @@
-#![no_std]
 #![no_main]
+#![no_std]
 extern crate alloc;
 
 use core::mem::MaybeUninit;
@@ -58,14 +58,11 @@ fn init_heap() {
 fn actual_ip(ip: &str) -> [u8; 4] {
 	let vec: Vec<u8> = ip
 		.split('.')
-		.map(|num| {
-			let data = match num.to_string().parse::<u8>() {
-				Err(_) => {
-					panic!("Ip address is wrong");
-				}
-				Ok(x) => x,
-			};
-			data
+		.map(|num| match num.to_string().parse::<u8>() {
+			Err(_) => {
+				panic!("Ip address is wrong");
+			}
+			Ok(x) => x,
 		})
 		.collect();
 	vec.as_slice().try_into().unwrap()
@@ -73,7 +70,7 @@ fn actual_ip(ip: &str) -> [u8; 4] {
 
 #[entry]
 fn main() -> ! {
-	let IP: &str = core::env!("IP");
+	let ip: &str = core::env!("IP");
 	let port: u16 = core::env!("PORT")
 		.parse::<u16>()
 		.expect("PORT is not a valid port");
@@ -81,7 +78,7 @@ fn main() -> ! {
 	init_heap();
 	init_logger(log::LevelFilter::Info);
 
-	let ip_address = actual_ip(IP);
+	let ip_address = actual_ip(ip);
 
 	// Initializing peripherals and clocks
 	let peripherals = Peripherals::take();
@@ -111,11 +108,10 @@ fn main() -> ! {
 		create_network_interface(&init, wifi, WifiStaDevice, socket_set_entries.as_mut()).unwrap();
 	let wifi_stack = WifiStack::new(iface, device, sockets, current_millis);
 	let io = IO::new(peripherals.GPIO, peripherals.IO_MUX);
-	let led = io.pins.gpio2.into_push_pull_output();
 
 	let analog_pin = io.pins.gpio25.into_analog();
 	let mut dac1 = DAC1::new(peripherals.DAC1, analog_pin);
-	let mut dac1_ref = &mut dac1;
+	let dac1_ref = &mut dac1;
 	init_wifi(SSID, PASSWORD, &mut controller, &wifi_stack);
 
 	println!("Start busy loop on main");
@@ -130,16 +126,14 @@ fn main() -> ! {
 		tx_meta.as_mut(),
 		&mut tx_udp_buffer,
 	);
-	let _msg_id: u16 = 100;
-	let _token: u8 = 0;
-	//let mut socket = wifi_stack.get_socket(&mut rx_buffer, &mut tx_buffer);
+
 	let socket_port = u16::try_from(rng.random() % 10000).unwrap();
 	println!("Port on ESP: {}", socket_port);
 	let err = udp_socket.bind(socket_port);
 	if err.is_err() {
 		println!("IoError");
 	}
-	let mut coapClient = coap::CoapClient::new(
+	let mut coap_client = coap::CoapClient::new(
 		udp_socket,
 		IpAddress::Ipv4(Ipv4Address::new(
 			ip_address[0],
@@ -167,7 +161,9 @@ fn main() -> ! {
 			// if cfg!(debug_assertions) {
 			// led.set_high();
 			// }
-			dac1_ref.write(device_state.brightness);
+			let mut actual_brightness = device_state.brightness;
+			actual_brightness /= 5;
+			dac1_ref.write(200 + actual_brightness);
 		} else {
 			dac1_ref.write(0);
 			// if cfg!(debug_assertions) {
@@ -175,25 +171,30 @@ fn main() -> ! {
 			// }
 		}
 		println!("{}", payload);
-		return Ok(());
+		Ok(())
 	};
 
 	loop {
 		println!("{}", controller.is_connected().unwrap());
 		println!("Making Coap request");
-		coapClient.make_observe_request(
+		let request_error = coap_client.make_observe_request(
 			"lights/33f808df-e9bf-4001-b364-d129d20993ed",
 			true,
 			observe_callback,
 		);
-		match controller.is_connected() {
-			Ok(is_connected) => {
-				if !is_connected {
-					controller.connect();
-				}
-			}
-			Err(err) => {
-				println!("Error ");
+		match request_error {
+			Ok(_) => {}
+			Err(_) => {
+				match controller.is_connected() {
+					Ok(is_connected) => {
+						if !is_connected {
+							let _ = controller.connect();
+						}
+					}
+					Err(_) => {
+						println!("Error");
+					}
+				};
 			}
 		};
 	}

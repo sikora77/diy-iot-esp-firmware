@@ -37,7 +37,6 @@ pub fn init_wifi(
 			}
 			Err(err) => {
 				println!("{:?}", err);
-				loop {}
 			}
 		}
 	}

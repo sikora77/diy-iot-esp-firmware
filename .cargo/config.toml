@@ -2,6 +2,10 @@
 runner = "espflash flash --monitor"
 
 
+[env]
+IP = ""
+PORT = ""
+
 [build]
 rustflags = [
   "-C",

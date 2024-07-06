@@ -31,7 +31,8 @@ impl<'a, 'b, MODE: WifiDeviceMode> CoapClient<'a, 'b, MODE> {
 		packet.set_token(resp.get_token().to_vec());
 		packet.header.code = MessageClass::Empty;
 		packet.header.message_id = resp.header.message_id;
-		self.socket
+		let _ = self
+			.socket
 			.send(self.ip, self.port, &packet.to_bytes().unwrap());
 	}
 
@@ -55,15 +56,15 @@ impl<'a, 'b, MODE: WifiDeviceMode> CoapClient<'a, 'b, MODE> {
 					message_bytes = message_bytes[0..receive_data.0].to_vec();
 					let resp = coap_lite::Packet::from_bytes(&message_bytes);
 
-					if resp.is_ok() {
-						return Ok(resp.unwrap());
+					if let Ok(resp) = resp {
+						return Ok(resp);
 					}
 					return Err(anyhow::Error::msg("Conversion from bytes to packet failed"));
 				}
 			} else {
 				let err = receive_data.unwrap_err();
-				// println!("{:?}", err);
-				// return Err(anyhow!("UDP error"));
+				println!("{:?}", err);
+				return Err(anyhow!("UDP error"));
 			}
 			if current_millis() > wait_end {
 				println!("Timeout");
@@ -133,12 +134,12 @@ impl<'a, 'b, MODE: WifiDeviceMode> CoapClient<'a, 'b, MODE> {
 		uri_path: &str,
 		is_confirmable: bool,
 		response_callback: &mut F,
-	) {
-		let mut resp = self.make_get_request(uri_path, is_confirmable, true, true);
+	) -> Result<(), anyhow::Error> {
+		let resp = self.make_get_request(uri_path, is_confirmable, true, true);
 		if resp.is_err() {
 			println!("{:?}", resp.unwrap_err());
 		}
-		self.observe(10, response_callback);
+		self.observe(10, response_callback)
 	}
 
 	fn observe<F: FnMut(Vec<u8>) -> Result<(), anyhow::Error>>(
