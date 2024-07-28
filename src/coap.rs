@@ -154,10 +154,11 @@ impl<'a, 'b, MODE: WifiDeviceMode> CoapClient<'a, 'b, MODE> {
 			if resp.is_ok() {
 				let resp = resp.unwrap();
 				println!("Handling observe");
-				let callback_error = response_callback(resp.payload.clone());
-				if callback_error.is_err() {
-					return callback_error;
-				}
+				/*let callback_error = */
+				response_callback(resp.payload.clone())?;
+				// if callback_error.is_err() {
+				// 	return callback_error;
+				// }
 				self.handle_response(resp);
 				self.msg_id += 1;
 

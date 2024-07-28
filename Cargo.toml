@@ -58,7 +58,11 @@ esp-wifi = { version = "0.6.0", features = [
     "coex",
 ] }
 
-esp-storage = { version = "0.3.0", features = ["esp32"] }
+esp-storage = { version = "0.3.0", features = [
+    "esp32",
+    "nor-flash",
+    "storage",
+] }
 
 embedded-storage = "0.3.1"
 [profile.dev.package.esp-wifi]

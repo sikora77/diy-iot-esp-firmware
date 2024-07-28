@@ -17,7 +17,8 @@ use embedded_storage::ReadStorage;
 use esp_hal::gpio::{Io, Level, Output};
 use esp_hal::system::SystemControl;
 use esp_hal::{
-	analog::dac::Dac1, clock::ClockControl, peripherals::Peripherals, prelude::*, rng::Rng,
+	analog::dac::Dac1, analog::dac::Dac2, clock::ClockControl, peripherals::Peripherals,
+	prelude::*, rng::Rng,
 };
 use esp_println::logger::init_logger;
 use esp_println::println;
@@ -39,10 +40,12 @@ mod coap;
 mod pairing;
 mod utils;
 
-const SSID: &str = "HALNy-2.4G-0a3b62_EXT";
+// const SSID: &str = "HALNy-2.4G-0a3b62_EXT";
+const SSID: &str = "NETIASPOT-asgndF5-2.4G";
 // const SSID: &str = "2.4G-dzCr";
 // const SSID: &str = "Redmi Note 9 Pro";
-const PASSWORD: &str = "$paroladordine";
+// const PASSWORD: &str = "$paroladordine";
+const PASSWORD: &str = "4vuDJn3eDEHvw3st8w";
 const DEVICE_ID: &str = "33f808df-e9bf-4001-b364-d129d20993ed";
 const FLASH_ADDR: u32 = 0x20000;
 // const PASSWORD: &str = "bVztpcdj";
@@ -90,6 +93,7 @@ fn main() -> ! {
 		Some(val) => val.parse::<bool>().expect("Invalid DEBUG value"),
 		None => false,
 	};
+	println!(core::env!("PORT"));
 	let port_env: u16 = core::env!("PORT")
 		.parse::<u16>()
 		.expect("PORT is not a valid port");
@@ -140,9 +144,9 @@ fn main() -> ! {
 	let wifi_stack = WifiStack::new(iface, device, sockets, current_millis);
 	let io = Io::new(peripherals.GPIO, peripherals.IO_MUX);
 
-	let analog_pin = io.pins.gpio25;
+	let analog_pin = io.pins.gpio26;
 	let mut digital_pin = Output::new(io.pins.gpio2, Level::Low);
-	let mut dac1 = Dac1::new(peripherals.DAC1, analog_pin);
+	let mut dac1 = Dac2::new(peripherals.DAC2, analog_pin);
 	let dac1_ref = &mut dac1;
 	init_wifi(SSID, PASSWORD, &mut controller, &wifi_stack);
 	if !is_configured_env {
@@ -203,7 +207,9 @@ fn main() -> ! {
 			// if cfg!(debug_assertions) {
 			// led.set_high();
 			// }
-			dac1_ref.write(device_state.brightness);
+			let mut actual_brightness = device_state.brightness;
+			actual_brightness /= 5;
+			dac1_ref.write(200 + actual_brightness);
 			if debug_env {
 				digital_pin.set_high();
 			}
