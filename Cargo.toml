@@ -68,9 +68,19 @@ embedded-storage = "0.3.1"
 [profile.dev.package.esp-wifi]
 opt-level = 3
 
-[profile.dev]
-lto = "off"
-[profile.release]
-lto = "off"
 [profile.dev.package.esp-storage]
 opt-level = 3
+log = { version = "0.4.21" }
+[profile.dev]
+# Rust debug is too slow.
+# For debug builds always builds with some optimization
+opt-level = 3
+
+[profile.release]
+codegen-units = 1        # LLVM can perform better optimizations using a single thread
+debug = 2
+debug-assertions = false
+incremental = false
+lto = 'fat'
+opt-level = 3
+overflow-checks = false

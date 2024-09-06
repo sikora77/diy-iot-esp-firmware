@@ -1,4 +1,5 @@
 #![feature(ascii_char)]
+#![feature(iter_collect_into)]
 #![no_std]
 #![no_main]
 extern crate alloc;
@@ -13,12 +14,12 @@ use esp_backtrace as _;
 
 use anyhow::anyhow;
 use bleps::HciConnector;
-use embedded_storage::ReadStorage;
+use embedded_storage::{ReadStorage, Storage};
 use esp_hal::gpio::{Io, Level, Output};
+use esp_hal::prelude::*;
 use esp_hal::system::SystemControl;
 use esp_hal::{
-	analog::dac::Dac1, analog::dac::Dac2, clock::ClockControl, peripherals::Peripherals,
-	prelude::*, rng::Rng,
+	analog::dac::Dac1, analog::dac::Dac2, clock::ClockControl, peripherals::Peripherals, rng::Rng,
 };
 use esp_println::logger::init_logger;
 use esp_println::println;
@@ -46,8 +47,14 @@ const SSID: &str = "NETIASPOT-asgndF5-2.4G";
 // const SSID: &str = "Redmi Note 9 Pro";
 // const PASSWORD: &str = "$paroladordine";
 const PASSWORD: &str = "4vuDJn3eDEHvw3st8w";
-const DEVICE_ID: &str = "33f808df-e9bf-4001-b364-d129d20993ed";
-const FLASH_ADDR: u32 = 0x20000;
+// const DEVICE_ID: &str = "33f808df-e9bf-4001-b364-d129d20993ed";
+const DEVICE_ID: &str = "EXAMPLE1-DEVI-CEID-DEV1-SAMPLEDEVICE";
+const DEVICE_SECRET: &str = "LONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRET8letters";
+const FLASH_ADDR: u32 = 0x9080;
+const SSID_ADDR: u32 = 0x9080;
+const PASS_ADDR: u32 = 0x9080 + 128;
+const ID_ADDR: u32 = 0x9080 + 256;
+const SECRET_ADDR: u32 = 0x9080 + 320;
 // const PASSWORD: &str = "bVztpcdj";
 // const PASSWORD: &str = "serwis15";
 
@@ -94,22 +101,30 @@ fn main() -> ! {
 		None => false,
 	};
 	println!(core::env!("PORT"));
+	// Line currently required for DEVICE_SECRET to appear as a string
+	println!("{}", DEVICE_SECRET);
+
 	let port_env: u16 = core::env!("PORT")
 		.parse::<u16>()
 		.expect("PORT is not a valid port");
 	init_heap();
 	let mut fs = FlashStorage::new();
 	let mut buf: [u8; 128] = [0u8; 128];
-	let mut write_buf: [u8; 5] = [0u8; 5];
-	write_buf.copy_from_slice(&b"Hello"[..]);
-	// fs.write(FLASH_ADDR,&write_buf);
+	let mut write_buf: [u8; 8] = [0u8; 8];
+	write_buf.copy_from_slice(&b"Hello   "[..]);
+	fs.write(FLASH_ADDR, &write_buf).unwrap();
 	// This reads the SSID
-	println!("Cap: {}", fs.capacity());
+	// println!("Cap: {}", fs.capacity());
 	fs.read(FLASH_ADDR, &mut buf).unwrap();
-	println!("{:?}", buf);
+	println!("SSID {:?}", buf);
 	// This reads the password
-	fs.read(FLASH_ADDR + 128, &mut buf).unwrap();
+	fs.read(PASS_ADDR, &mut buf).unwrap();
 	println!("{:?}", buf);
+	// Device ID is 36 bytes long
+	fs.read(ID_ADDR, &mut buf).unwrap();
+	// Device secret is 344 bytes long
+	let mut secret_buf: [u8; 512] = [0u8; 512];
+	fs.read(SECRET_ADDR, &mut secret_buf).unwrap();
 	init_logger(log::LevelFilter::Info);
 
 	let ip_address = actual_ip(ip_env);
@@ -148,14 +163,16 @@ fn main() -> ! {
 	let mut digital_pin = Output::new(io.pins.gpio2, Level::Low);
 	let mut dac1 = Dac2::new(peripherals.DAC2, analog_pin);
 	let dac1_ref = &mut dac1;
-	init_wifi(SSID, PASSWORD, &mut controller, &wifi_stack);
+	if is_configured_env {
+		init_wifi(SSID, PASSWORD, &mut controller, &wifi_stack);
+	}
 	if !is_configured_env {
 		let mut bluetooth = peripherals.BT;
 		controller.stop().unwrap();
 		loop {
 			let connector = BleConnector::new(&init, &mut bluetooth);
 			let hci = HciConnector::new(connector, current_millis);
-			pairing::init_advertising(hci, &mut fs);
+			pairing::init_advertising(hci);
 		}
 	}
 	println!("Start busy loop on main");

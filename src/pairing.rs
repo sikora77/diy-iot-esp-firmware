@@ -1,3 +1,5 @@
+use alloc::vec;
+use alloc::vec::Vec;
 use bleps::{
 	ad_structure::{
 		create_advertising_data, AdStructure, BR_EDR_NOT_SUPPORTED, LE_GENERAL_DISCOVERABLE,
@@ -6,13 +8,18 @@ use bleps::{
 	gatt, Ble, HciConnector,
 };
 use embedded_io::blocking::Write;
-use esp_storage::FlashStorage;
-
+use embedded_storage::{ReadStorage, Storage};
+use esp_backtrace as _;
+use esp_hal::prelude::*;
 use esp_println::println;
+use esp_storage::FlashStorage;
 use esp_wifi::ble::controller::BleConnector;
 
+use crate::{PASS_ADDR, SSID_ADDR};
+
 #[allow(non_snake_case)]
-pub fn init_advertising(hci: HciConnector<BleConnector>, mut _fs: &mut FlashStorage) {
+pub fn init_advertising(hci: HciConnector<BleConnector>) {
+	let mut fs = FlashStorage::new();
 	println!("Begin bluetooth stuff");
 	let mut ble = Ble::new(&hci);
 	ble.init().unwrap();
@@ -35,12 +42,51 @@ pub fn init_advertising(hci: HciConnector<BleConnector>, mut _fs: &mut FlashStor
 		data.write(&id_bytes[offset..]).unwrap();
 		crate::DEVICE_ID.len() - offset
 	};
+	let mut ssid_buf: [u8; 128] = [0u8; 128];
+	let mut ssid_offset: u8 = 0;
+	let mut message_started = false;
+	// There has to be 0x00 at the end of the string
 	let mut write_wifi_ssid = |offset: usize, data: &[u8]| {
-		println!(
-			"RECEIVED SSID: {} {:?}",
-			offset,
-			data.as_ascii().map(|str_data| str_data.as_str())
-		);
+		let mut ssid_data: Vec<u8> = vec![];
+		data.iter().collect_into(&mut ssid_data);
+		//TODO For current debug I have to change this
+		// also debug, message start is 4 dots
+		println!("{:?}", ssid_data);
+		// Recognize start of message
+		if ssid_data.len() > 4 && ssid_data[0..4] == [46, 46, 46, 46] && !message_started {
+			// This is a start of a message
+			message_started = true;
+			ssid_offset = 0;
+			ssid_data.drain(0..4);
+		}
+		if !message_started {
+			// Welp, something went horribly wrong
+			println!("The horribly wrong happened")
+		} else {
+			// Recognize end of message
+			if ssid_data[ssid_data.len() - 4..ssid_data.len()] == [46, 46, 46, 46] {
+				message_started = false;
+				ssid_buf[ssid_offset as usize..(ssid_offset as usize + ssid_data.len() - 4)]
+					.copy_from_slice(&ssid_data[0..ssid_data.len() - 4]);
+				let data_size = ((ssid_offset + 20) / 8) * 8;
+				println!(
+					"RECEIVED SSID: {} {:?}",
+					offset,
+					&ssid_buf[0..data_size as usize]
+						.as_ascii()
+						.map(|str_data| str_data.as_str())
+				);
+				fs.write(SSID_ADDR, &ssid_buf[0..data_size as usize])
+					.unwrap();
+				let mut read_bytes: [u8; 128] = [0u8; 128];
+				fs.read(SSID_ADDR, &mut read_bytes).unwrap();
+				println!("READ FROM FLASH: {:?}", read_bytes);
+				return;
+			}
+			ssid_buf[ssid_offset as usize..(ssid_offset as usize + ssid_data.len())]
+				.copy_from_slice(&ssid_data);
+			ssid_offset += ssid_data.len() as u8;
+		}
 	};
 
 	let mut write_wifi_password = |offset: usize, data: &[u8]| {
