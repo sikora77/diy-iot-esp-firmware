@@ -9,7 +9,7 @@ use alloc::format;
 use core::mem::MaybeUninit;
 use core::str;
 use embedded_storage::nor_flash::NorFlash;
-use utils::get_wifi_config;
+use utils::{get_device_id, get_wifi_config};
 
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -57,7 +57,7 @@ const CONFIG_ADDR: u32 = 0x9000;
 const SSID_ADDR: u32 = 0x9080;
 const PASS_ADDR: u32 = 0x9080 + 128;
 const ID_ADDR: u32 = 0x9080 + 256;
-const SECRET_ADDR: u32 = 0x9080 + 320;
+const SECRET_ADDR: u32 = ID_ADDR + 36;
 // const PASSWORD: &str = "bVztpcdj";
 // const PASSWORD: &str = "serwis15";
 
@@ -94,6 +94,8 @@ fn actual_ip(ip: &str) -> [u8; 4] {
 
 #[entry]
 fn main() -> ! {
+	let mut fs = FlashStorage::new();
+
 	let ip_env: &str = core::env!("IP");
 	let is_configured_env = match core::option_env!("IS_CONFIGURED") {
 		Some(val) => val.parse::<bool>().expect("Invalid IS_CONFIGURED value"),
@@ -111,14 +113,9 @@ fn main() -> ! {
 		.parse::<u16>()
 		.expect("PORT is not a valid port");
 	init_heap();
-	let mut fs = FlashStorage::new();
-	let mut buf: [u8; 128] = [0u8; 128];
-	// Device ID is 36 bytes long
-	fs.read(ID_ADDR, &mut buf).unwrap();
-	let device_id = str::from_utf8(&buf[0..36]).unwrap();
+	let device_id_bytes = get_device_id(&mut fs);
+	let device_id = str::from_utf8(&device_id_bytes).unwrap();
 	// Device secret is 344 bytes long
-	let mut secret_buf: [u8; 512] = [0u8; 512];
-	fs.read(SECRET_ADDR, &mut secret_buf).unwrap();
 
 	init_logger(log::LevelFilter::Info);
 

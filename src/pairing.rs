@@ -1,4 +1,8 @@
-use core::cell::Cell;
+use core::{
+	cell::Cell,
+	cmp::max,
+	ops::{Add, AddAssign, Sub},
+};
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -16,10 +20,12 @@ use esp_println::println;
 use esp_storage::FlashStorage;
 use esp_wifi::ble::controller::BleConnector;
 
-use crate::{PASS_ADDR, SSID_ADDR};
+use crate::{utils::get_device_secret, PASS_ADDR, SSID_ADDR};
 
 #[allow(non_snake_case)]
 pub fn init_advertising(hci: HciConnector<BleConnector>) -> bool {
+	let mut fs = FlashStorage::new();
+
 	println!("Begin bluetooth stuff");
 	let mut ble = Ble::new(&hci);
 	ble.init().unwrap();
@@ -43,38 +49,43 @@ pub fn init_advertising(hci: HciConnector<BleConnector>) -> bool {
 		crate::DEVICE_ID.len() - offset
 	};
 	let mut ssid_buf: [u8; 128] = [0u8; 128];
-	let ssid_offset: u8 = 0;
+	let mut ssid_offset: usize = 0;
 	let mut ssid_message_started = false;
 	let is_ssid_written = Cell::new(false);
 	let is_password_written = Cell::new(false);
+	let mut ssid_suffix_bytes = 0u8;
 	let mut write_wifi_ssid = |_offset: usize, data: &[u8]| {
 		handle_write(
 			&mut ssid_buf,
 			&mut ssid_message_started,
 			SSID_ADDR,
-			&mut (ssid_offset as usize),
+			&mut ssid_offset,
 			data,
 			&is_ssid_written,
+			&mut ssid_suffix_bytes,
 		)
 	};
 	let mut pass_buf: [u8; 128] = [0u8; 128];
-	let pass_offset: u8 = 0;
+	let mut pass_offset: usize = 0;
 	let mut pass_message_started = false;
+	let mut pass_suffix_bytes = 0u8;
+
 	let mut write_wifi_password = |_offset: usize, data: &[u8]| {
 		handle_write(
 			&mut pass_buf,
 			&mut pass_message_started,
 			PASS_ADDR,
-			&mut (pass_offset as usize),
+			&mut pass_offset,
 			data,
 			&is_password_written,
+			&mut pass_suffix_bytes,
 		)
 	};
 
 	let mut read_secret = |offset: usize, mut data: &mut [u8]| {
-		let hello = &b"Hola!"[..];
-		data.write(hello).unwrap();
-		30 - offset
+		let secret = get_device_secret(&mut fs);
+		data.write(&secret).unwrap();
+		344 - offset
 	};
 	gatt!([service {
 		uuid: "937312e0-2354-11eb-9f10-fbc30a62cf38",
@@ -130,6 +141,7 @@ fn handle_write(
 	offset: &mut usize,
 	data: &[u8],
 	finished_writing: &Cell<bool>,
+	suffix_chars: &mut u8,
 ) {
 	let mut fs = FlashStorage::new();
 	let mut write_data: Vec<u8> = vec![];
@@ -138,6 +150,7 @@ fn handle_write(
 	// also debug, message start is 4 dots
 	//TODO recognize that ending dots can be split up between messages
 	println!("{:?}", write_data);
+	println!("{}", *offset);
 	// Recognize start of message
 	if write_data.len() > 4 && write_data[0..4] == [46, 46, 46, 46] && !*message_started {
 		// This is a start of a message
@@ -150,10 +163,25 @@ fn handle_write(
 		println!("The horribly wrong happened")
 	} else {
 		// Recognize end of message
-		if write_data[write_data.len() - 4..write_data.len()] == [46, 46, 46, 46] {
+		// alt implementation - check last bytes to see dots
+		for byte in
+			write_data[max(write_data.len() as i16 - 4, 0) as usize..write_data.len()].iter()
+		{
+			if *byte == 46u8 {
+				*suffix_chars += 1;
+			} else {
+				*suffix_chars = 0;
+			}
+		}
+		if *suffix_chars == 4u8 {
 			*message_started = false;
-			buf[*offset..(*offset + write_data.len() - 4)]
-				.copy_from_slice(&write_data[0..write_data.len() - 4]);
+			buf[*offset..(*offset + write_data.len())]
+				.copy_from_slice(&write_data[0..write_data.len()]);
+			for byte in
+				buf[offset.sub(4).add(write_data.len())..*offset + write_data.len()].iter_mut()
+			{
+				*byte = 0;
+			}
 			fs.write(address, buf).unwrap();
 			finished_writing.set(true);
 			return;

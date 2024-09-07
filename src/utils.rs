@@ -4,7 +4,7 @@
 use core::str;
 
 use crate::errors::{PasswordFlashError, SSIDFlashError};
-use crate::{PASS_ADDR, SSID_ADDR};
+use crate::{ID_ADDR, PASS_ADDR, SECRET_ADDR, SSID_ADDR};
 use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
 use alloc::string::String;
@@ -97,4 +97,16 @@ pub fn get_wifi_config() -> Result<WifiConfig, Box<dyn Error>> {
 		ssid: ssid_result.unwrap().trim_matches(char::from(0)).to_owned(),
 		password: pass_result.unwrap().trim_matches(char::from(0)).to_owned(),
 	})
+}
+
+pub fn get_device_id(fs: &mut FlashStorage) -> [u8; 36] {
+	let mut buf: [u8; 36] = [0u8; 36];
+	// Device ID is 36 bytes long
+	fs.read(ID_ADDR, &mut buf).unwrap();
+	buf
+}
+pub fn get_device_secret(fs: &mut FlashStorage) -> [u8; 344] {
+	let mut secret_buf: [u8; 344] = [0u8; 344];
+	fs.read(SECRET_ADDR, &mut secret_buf).unwrap();
+	secret_buf
 }
