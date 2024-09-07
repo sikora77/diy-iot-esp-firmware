@@ -138,7 +138,8 @@ impl<'a, 'b, MODE: WifiDeviceMode> CoapClient<'a, 'b, MODE> {
 	) -> Result<(), anyhow::Error> {
 		let resp = self.make_get_request(uri_path, is_confirmable, true, true);
 		if resp.is_err() {
-			println!("{:?}", resp.unwrap_err());
+			log!(Level::Debug, "{}", resp.unwrap_err().to_string());
+			// println!("{:?}", resp.unwrap_err());
 		}
 		self.observe(10, response_callback)
 	}
@@ -167,7 +168,7 @@ impl<'a, 'b, MODE: WifiDeviceMode> CoapClient<'a, 'b, MODE> {
 			// let is_connected = self.controller.is_connected().unwrap();
 			// println!("{}", is_connected);
 			} else {
-				log!(Level::Warn, "{}", resp.unwrap_err().to_string());
+				log!(Level::Debug, "{}", resp.unwrap_err().to_string());
 				// println!();
 			}
 			if current_millis() > wait_end {

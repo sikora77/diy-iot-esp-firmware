@@ -8,6 +8,7 @@ extern crate alloc;
 use alloc::format;
 use core::mem::MaybeUninit;
 use core::str;
+use embedded_storage::nor_flash::NorFlash;
 use utils::get_wifi_config;
 
 use alloc::string::{String, ToString};
@@ -52,7 +53,7 @@ mod utils;
 // const DEVICE_ID: &str = "33f808df-e9bf-4001-b364-d129d20993ed";
 const DEVICE_ID: &str = "EXAMPLE1-DEVI-CEID-DEV1-SAMPLEDEVICE";
 const DEVICE_SECRET: &str = "LONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRET8letters";
-// const FLASH_ADDR: u32 = 0x9080;
+const CONFIG_ADDR: u32 = 0x9000;
 const SSID_ADDR: u32 = 0x9080;
 const PASS_ADDR: u32 = 0x9080 + 128;
 const ID_ADDR: u32 = 0x9080 + 256;
@@ -114,9 +115,11 @@ fn main() -> ! {
 	let mut buf: [u8; 128] = [0u8; 128];
 	// Device ID is 36 bytes long
 	fs.read(ID_ADDR, &mut buf).unwrap();
+	let device_id = str::from_utf8(&buf[0..36]).unwrap();
 	// Device secret is 344 bytes long
 	let mut secret_buf: [u8; 512] = [0u8; 512];
 	fs.read(SECRET_ADDR, &mut secret_buf).unwrap();
+
 	init_logger(log::LevelFilter::Info);
 
 	let ip_address = actual_ip(ip_env);
@@ -155,33 +158,69 @@ fn main() -> ! {
 	let mut digital_pin = Output::new(io.pins.gpio2, Level::Low);
 	let mut dac1 = Dac2::new(peripherals.DAC2, analog_pin);
 	let dac1_ref = &mut dac1;
-
-	let wifi_config_result = get_wifi_config();
-	let mut is_wifi_configured = true;
-	if wifi_config_result.is_err() {
-		is_wifi_configured = false;
-	}
-
-	if is_configured_env && is_wifi_configured {
-		let wifi_config = wifi_config_result.unwrap();
-		println!("Wifi config:");
-		println!("SSID: {}", wifi_config.ssid);
-		println!("Password: {}", wifi_config.password);
-		init_wifi(
+	let mut config_bytes = [255u8; 4];
+	fs.read(CONFIG_ADDR, &mut config_bytes).unwrap();
+	if config_bytes == [0, 0, 0, 0] {
+		let wifi_config = get_wifi_config().unwrap();
+		while !init_wifi(
 			&wifi_config.ssid,
 			&wifi_config.password,
 			&mut controller,
 			&wifi_stack,
-		);
-	}
-	if !is_configured_env || !is_wifi_configured {
+		) {}
+	} else {
+		// let wifi_config_result = get_wifi_config();
+		// let mut is_wifi_configured = true;
+		// if wifi_config_result.is_err() {
+		// 	is_wifi_configured = false;
+		// }
+
+		// if is_wifi_configured {
+		// 	let wifi_config = wifi_config_result.unwrap();
+		// 	println!("Wifi config:");
+		// 	println!("SSID: {}", wifi_config.ssid);
+		// 	println!("Password: {}", wifi_config.password);
+		// 	if !init_wifi(
+		// 		&wifi_config.ssid,
+		// 		&wifi_config.password,
+		// 		&mut controller,
+		// 		&wifi_stack,
+		// 	) {
+		// 		is_wifi_configured = false;
+		// 	}
+		// }
+		// if !is_configured_env || !is_wifi_configured {
 		let mut bluetooth = peripherals.BT;
 		controller.stop().unwrap();
 		loop {
 			let connector = BleConnector::new(&init, &mut bluetooth);
 			let hci = HciConnector::new(connector, current_millis);
-			pairing::init_advertising(hci);
+			if pairing::init_advertising(hci) {
+				let wifi_config_result = get_wifi_config();
+				let mut is_wifi_configured = true;
+				if wifi_config_result.is_err() {
+					is_wifi_configured = false;
+				}
+
+				if is_wifi_configured {
+					let wifi_config = wifi_config_result.unwrap();
+					println!("Wifi config:");
+					println!("SSID: {}", wifi_config.ssid);
+					println!("Password: {}", wifi_config.password);
+					if init_wifi(
+						&wifi_config.ssid,
+						&wifi_config.password,
+						&mut controller,
+						&wifi_stack,
+					) {
+						let config_bytes = [0u8; 4];
+						fs.write(CONFIG_ADDR, &config_bytes).unwrap();
+						break;
+					}
+				}
+			}
 		}
+		// }
 	}
 	println!("Start busy loop on main");
 
@@ -253,7 +292,7 @@ fn main() -> ! {
 		println!("{}", controller.is_connected().unwrap());
 		println!("Making Coap request");
 		let _ = coap_client.make_observe_request(
-			&format!("lights/{}", DEVICE_ID),
+			&format!("lights/{}", device_id),
 			true,
 			observe_callback,
 		);
