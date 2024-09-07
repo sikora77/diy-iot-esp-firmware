@@ -1,11 +1,25 @@
 // use embedded_svc::ipv4::Interface;
 // use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi};
 
+use core::{fmt, str};
+
+use crate::errors::{PasswordFlashError, SSIDFlashError};
+use crate::{PASS_ADDR, SSID_ADDR};
+use alloc::borrow::ToOwned;
+use alloc::boxed::Box;
+use alloc::string::String;
+use core::error::Error;
+use embedded_storage::{ReadStorage, Storage};
 use esp_backtrace as _;
 use esp_println::println;
+use esp_storage::FlashStorage;
 use esp_wifi::wifi::{ClientConfiguration, Configuration, WifiController, WifiStaDevice};
 use esp_wifi::wifi_interface::WifiStack;
 
+pub struct WifiConfig {
+	pub ssid: String,
+	pub password: String,
+}
 pub fn init_wifi(
 	ssid: &str,
 	password: &str,
@@ -52,4 +66,28 @@ pub fn init_wifi(
 			break;
 		}
 	}
+}
+pub fn get_wifi_config() -> Result<WifiConfig, Box<dyn Error>> {
+	let mut ssid_buf: [u8; 128] = [0u8; 128];
+	let mut fs = FlashStorage::new();
+	// This reads the SSID
+	fs.read(SSID_ADDR, &mut ssid_buf).unwrap();
+	// TODO convert to UTF-8
+
+	let ssid_result = str::from_utf8(&ssid_buf);
+	if ssid_result.is_err() {
+		return Err(SSIDFlashError.into());
+	}
+	let mut password_buf: [u8; 128] = [0u8; 128];
+
+	// This reads the password
+	fs.read(PASS_ADDR, &mut password_buf).unwrap();
+	let pass_result = str::from_utf8(&password_buf);
+	if pass_result.is_err() {
+		return Err(PasswordFlashError.into());
+	}
+	Ok(WifiConfig {
+		ssid: ssid_result.unwrap().trim_matches(char::from(0)).to_owned(),
+		password: pass_result.unwrap().trim_matches(char::from(0)).to_owned(),
+	})
 }

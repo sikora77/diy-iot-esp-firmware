@@ -5,6 +5,7 @@ use coap_lite::{CoapOption, ContentFormat, MessageClass, MessageType, Packet, Re
 use esp_println::println;
 use esp_wifi::wifi::WifiDeviceMode;
 use esp_wifi::{current_millis, wifi_interface::UdpSocket};
+use log::{log, Level};
 use smoltcp::wire::IpAddress;
 
 pub struct CoapClient<'a, 'b, MODE: WifiDeviceMode> {
@@ -62,8 +63,8 @@ impl<'a, 'b, MODE: WifiDeviceMode> CoapClient<'a, 'b, MODE> {
 					return Err(anyhow::Error::msg("Conversion from bytes to packet failed"));
 				}
 			} else {
-				let err = receive_data.unwrap_err();
-				println!("{:?}", err);
+				// let err = receive_data.unwrap_err();
+				// println!("{:?}", err);
 				return Err(anyhow!("UDP error"));
 			}
 			if current_millis() > wait_end {
@@ -166,7 +167,8 @@ impl<'a, 'b, MODE: WifiDeviceMode> CoapClient<'a, 'b, MODE> {
 			// let is_connected = self.controller.is_connected().unwrap();
 			// println!("{}", is_connected);
 			} else {
-				println!("{}", resp.unwrap_err().to_string());
+				log!(Level::Warn, "{}", resp.unwrap_err().to_string());
+				// println!();
 			}
 			if current_millis() > wait_end {
 				println!("Timeout");

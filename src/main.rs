@@ -1,4 +1,5 @@
 #![feature(ascii_char)]
+#![feature(error_in_core)]
 #![feature(iter_collect_into)]
 #![no_std]
 #![no_main]
@@ -6,6 +7,8 @@ extern crate alloc;
 
 use alloc::format;
 use core::mem::MaybeUninit;
+use core::str;
+use utils::get_wifi_config;
 
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -14,13 +17,11 @@ use esp_backtrace as _;
 
 use anyhow::anyhow;
 use bleps::HciConnector;
-use embedded_storage::{ReadStorage, Storage};
+use embedded_storage::ReadStorage;
 use esp_hal::gpio::{Io, Level, Output};
 use esp_hal::prelude::*;
 use esp_hal::system::SystemControl;
-use esp_hal::{
-	analog::dac::Dac1, analog::dac::Dac2, clock::ClockControl, peripherals::Peripherals, rng::Rng,
-};
+use esp_hal::{analog::dac::Dac2, clock::ClockControl, peripherals::Peripherals, rng::Rng};
 use esp_println::logger::init_logger;
 use esp_println::println;
 use esp_storage::FlashStorage;
@@ -38,19 +39,20 @@ use smoltcp::{
 use crate::utils::init_wifi;
 
 mod coap;
+mod errors;
 mod pairing;
 mod utils;
 
 // const SSID: &str = "HALNy-2.4G-0a3b62_EXT";
-const SSID: &str = "NETIASPOT-asgndF5-2.4G";
+// const SSID: &str = "NETIASPOT-asgndF5-2.4G";
 // const SSID: &str = "2.4G-dzCr";
 // const SSID: &str = "Redmi Note 9 Pro";
 // const PASSWORD: &str = "$paroladordine";
-const PASSWORD: &str = "4vuDJn3eDEHvw3st8w";
+// const PASSWORD: &str = "4vuDJn3eDEHvw3st8w";
 // const DEVICE_ID: &str = "33f808df-e9bf-4001-b364-d129d20993ed";
 const DEVICE_ID: &str = "EXAMPLE1-DEVI-CEID-DEV1-SAMPLEDEVICE";
 const DEVICE_SECRET: &str = "LONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRETLONGDEVICESECRET8letters";
-const FLASH_ADDR: u32 = 0x9080;
+// const FLASH_ADDR: u32 = 0x9080;
 const SSID_ADDR: u32 = 0x9080;
 const PASS_ADDR: u32 = 0x9080 + 128;
 const ID_ADDR: u32 = 0x9080 + 256;
@@ -110,16 +112,6 @@ fn main() -> ! {
 	init_heap();
 	let mut fs = FlashStorage::new();
 	let mut buf: [u8; 128] = [0u8; 128];
-	let mut write_buf: [u8; 8] = [0u8; 8];
-	write_buf.copy_from_slice(&b"Hello   "[..]);
-	fs.write(FLASH_ADDR, &write_buf).unwrap();
-	// This reads the SSID
-	// println!("Cap: {}", fs.capacity());
-	fs.read(FLASH_ADDR, &mut buf).unwrap();
-	println!("SSID {:?}", buf);
-	// This reads the password
-	fs.read(PASS_ADDR, &mut buf).unwrap();
-	println!("{:?}", buf);
 	// Device ID is 36 bytes long
 	fs.read(ID_ADDR, &mut buf).unwrap();
 	// Device secret is 344 bytes long
@@ -163,10 +155,26 @@ fn main() -> ! {
 	let mut digital_pin = Output::new(io.pins.gpio2, Level::Low);
 	let mut dac1 = Dac2::new(peripherals.DAC2, analog_pin);
 	let dac1_ref = &mut dac1;
-	if is_configured_env {
-		init_wifi(SSID, PASSWORD, &mut controller, &wifi_stack);
+
+	let wifi_config_result = get_wifi_config();
+	let mut is_wifi_configured = true;
+	if wifi_config_result.is_err() {
+		is_wifi_configured = false;
 	}
-	if !is_configured_env {
+
+	if is_configured_env && is_wifi_configured {
+		let wifi_config = wifi_config_result.unwrap();
+		println!("Wifi config:");
+		println!("SSID: {}", wifi_config.ssid);
+		println!("Password: {}", wifi_config.password);
+		init_wifi(
+			&wifi_config.ssid,
+			&wifi_config.password,
+			&mut controller,
+			&wifi_stack,
+		);
+	}
+	if !is_configured_env || !is_wifi_configured {
 		let mut bluetooth = peripherals.BT;
 		controller.stop().unwrap();
 		loop {
