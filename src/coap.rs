@@ -44,7 +44,7 @@ impl<'a, 'b, MODE: WifiDeviceMode> CoapClient<'a, 'b, MODE> {
 		let mut message_bytes: Vec<u8> = vec![];
 		self.socket.work();
 		// delay.delay_millis(1000);
-		println!("receiving");
+		log!(Level::Debug, "Receiving");
 		loop {
 			let mut receive_buffer: [u8; 512] = [0; 512];
 			let receive_data = self.socket.receive(&mut receive_buffer);

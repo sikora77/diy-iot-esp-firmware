@@ -19,7 +19,7 @@ use esp_backtrace as _;
 use anyhow::anyhow;
 use bleps::HciConnector;
 use embedded_storage::ReadStorage;
-use esp_hal::gpio::{Io, Level, Output};
+use esp_hal::gpio::{Input, Io, Level, Output};
 use esp_hal::prelude::*;
 use esp_hal::system::SystemControl;
 use esp_hal::{analog::dac::Dac2, clock::ClockControl, peripherals::Peripherals, rng::Rng};
@@ -156,7 +156,15 @@ fn main() -> ! {
 	let mut dac1 = Dac2::new(peripherals.DAC2, analog_pin);
 	let dac1_ref = &mut dac1;
 	let mut config_bytes = [255u8; 4];
+	// let reset_pin = Input::new(io.pins.gpio18, esp_hal::gpio::Pull::Down);
+	// let reset_level = reset_pin.get_level();
+	// println!("{:?}", reset_level);
+	// if reset_level == Level::High {
+	// 	println!("Resetting the config bytes");
+	// 	fs.write(CONFIG_ADDR, &config_bytes).unwrap()
+	// } else {
 	fs.read(CONFIG_ADDR, &mut config_bytes).unwrap();
+	// }
 	if config_bytes == [0, 0, 0, 0] {
 		let wifi_config = get_wifi_config().unwrap();
 		while !init_wifi(
@@ -166,27 +174,6 @@ fn main() -> ! {
 			&wifi_stack,
 		) {}
 	} else {
-		// let wifi_config_result = get_wifi_config();
-		// let mut is_wifi_configured = true;
-		// if wifi_config_result.is_err() {
-		// 	is_wifi_configured = false;
-		// }
-
-		// if is_wifi_configured {
-		// 	let wifi_config = wifi_config_result.unwrap();
-		// 	println!("Wifi config:");
-		// 	println!("SSID: {}", wifi_config.ssid);
-		// 	println!("Password: {}", wifi_config.password);
-		// 	if !init_wifi(
-		// 		&wifi_config.ssid,
-		// 		&wifi_config.password,
-		// 		&mut controller,
-		// 		&wifi_stack,
-		// 	) {
-		// 		is_wifi_configured = false;
-		// 	}
-		// }
-		// if !is_configured_env || !is_wifi_configured {
 		let mut bluetooth = peripherals.BT;
 		controller.stop().unwrap();
 		loop {
