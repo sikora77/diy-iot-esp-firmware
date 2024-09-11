@@ -8,7 +8,6 @@ extern crate alloc;
 use alloc::format;
 use core::mem::MaybeUninit;
 use core::str;
-use embedded_storage::nor_flash::NorFlash;
 use utils::{get_device_id, get_wifi_config};
 
 use alloc::string::{String, ToString};
@@ -172,34 +171,9 @@ fn main() -> ! {
 	} else {
 		let mut bluetooth = peripherals.BT;
 		controller.stop().unwrap();
-		loop {
-			let connector = BleConnector::new(&init, &mut bluetooth);
-			let hci = HciConnector::new(connector, current_millis);
-			if pairing::init_advertising(hci) {
-				let wifi_config_result = get_wifi_config();
-				let mut is_wifi_configured = true;
-				if wifi_config_result.is_err() {
-					is_wifi_configured = false;
-				}
-
-				if is_wifi_configured {
-					let wifi_config = wifi_config_result.unwrap();
-					println!("Wifi config:");
-					println!("SSID: {}", wifi_config.ssid);
-					println!("Password: {}", wifi_config.password);
-					if init_wifi(
-						&wifi_config.ssid,
-						&wifi_config.password,
-						&mut controller,
-						&wifi_stack,
-					) {
-						let config_bytes = [0u8; 4];
-						fs.write(CONFIG_ADDR, &config_bytes).unwrap();
-						break;
-					}
-				}
-			}
-		}
+		let connector = BleConnector::new(&init, &mut bluetooth);
+		let hci = HciConnector::new(connector, current_millis);
+		while !pairing::init_advertising(&hci, &mut controller, &wifi_stack) {}
 		// }
 	}
 	println!("Start busy loop on main");

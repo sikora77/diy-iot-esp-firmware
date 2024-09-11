@@ -4,12 +4,12 @@
 use core::str;
 
 use crate::errors::{PasswordFlashError, SSIDFlashError};
-use crate::{ID_ADDR, PASS_ADDR, SECRET_ADDR, SSID_ADDR};
+use crate::{CONFIG_ADDR, ID_ADDR, PASS_ADDR, SECRET_ADDR, SSID_ADDR};
 use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
 use alloc::string::String;
 use core::error::Error;
-use embedded_storage::ReadStorage;
+use embedded_storage::{ReadStorage, Storage};
 use esp_backtrace as _;
 use esp_println::println;
 use esp_storage::FlashStorage;
@@ -98,7 +98,35 @@ pub fn get_wifi_config() -> Result<WifiConfig, Box<dyn Error>> {
 		password: pass_result.unwrap().trim_matches(char::from(0)).to_owned(),
 	})
 }
+pub fn connect_to_wifi(
+	controller: &mut WifiController,
+	wifi_stack: &WifiStack<WifiStaDevice>,
+) -> bool {
+	let mut fs = FlashStorage::new();
+	let wifi_config_result = get_wifi_config();
+	let mut is_wifi_configured = true;
+	if wifi_config_result.is_err() {
+		is_wifi_configured = false;
+	}
 
+	if is_wifi_configured {
+		let wifi_config = wifi_config_result.unwrap();
+		println!("Wifi config:");
+		println!("SSID: {}", wifi_config.ssid);
+		println!("Password: {}", wifi_config.password);
+		if init_wifi(
+			&wifi_config.ssid,
+			&wifi_config.password,
+			controller,
+			wifi_stack,
+		) {
+			let config_bytes = [0u8; 4];
+			fs.write(CONFIG_ADDR, &config_bytes).unwrap();
+			return true;
+		}
+	}
+	false
+}
 pub fn get_device_id(fs: &mut FlashStorage) -> [u8; 36] {
 	let mut buf: [u8; 36] = [0u8; 36];
 	// Device ID is 36 bytes long

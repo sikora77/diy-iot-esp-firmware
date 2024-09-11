@@ -18,16 +18,27 @@ use embedded_storage::Storage;
 use esp_backtrace as _;
 use esp_println::println;
 use esp_storage::FlashStorage;
-use esp_wifi::ble::controller::BleConnector;
+use esp_wifi::{
+	ble::controller::BleConnector,
+	wifi::{WifiController, WifiStaDevice},
+	wifi_interface::WifiStack,
+};
 
-use crate::{utils::get_device_secret, PASS_ADDR, SSID_ADDR};
+use crate::{
+	utils::{connect_to_wifi, get_device_secret},
+	PASS_ADDR, SSID_ADDR,
+};
 
 #[allow(non_snake_case)]
-pub fn init_advertising(hci: HciConnector<BleConnector>) -> bool {
+pub fn init_advertising(
+	hci: &HciConnector<BleConnector>,
+	controller: &mut WifiController,
+	wifi_stack: &WifiStack<WifiStaDevice>,
+) -> bool {
 	let mut fs = FlashStorage::new();
 
 	println!("Begin bluetooth stuff");
-	let mut ble = Ble::new(&hci);
+	let mut ble = Ble::new(hci);
 	ble.init().unwrap();
 	ble.cmd_set_le_advertising_parameters().unwrap();
 	ble.cmd_set_le_advertising_data(
@@ -87,15 +98,19 @@ pub fn init_advertising(hci: HciConnector<BleConnector>) -> bool {
 		data.write(&secret).unwrap();
 		344 - offset
 	};
-	let mut notify_configured = |offset: usize, mut data: &mut [u8]| {
+	let mut notify_configured_read = |offset: usize, mut data: &mut [u8]| {
 		// let secret = get_device_secret(&mut fs);
 		// data.write(&secret).unwrap();
 		let mut buf = b"false\0\0\0";
-		if true {
+		if false {
 			buf = b"true\0\0\0\0";
 		}
 		data.write(buf).unwrap();
 		8 - offset
+	};
+	let is_config_conifrmed = Cell::new(false);
+	let mut notify_configured_write = |_offset: usize, _data: &[u8]| {
+		is_config_conifrmed.set(true);
 	};
 	gatt!([service {
 		uuid: "937312e0-2354-11eb-9f10-fbc30a62cf38",
@@ -114,7 +129,8 @@ pub fn init_advertising(hci: HciConnector<BleConnector>) -> bool {
 				name: "device_configured",
 				uuid: "987312e0-2354-11eb-9f10-fbc30a62cf50",
 				notify: true,
-				read: notify_configured
+				read: notify_configured_read,
+				write: notify_configured_write,
 			},
 			characteristic {
 				uuid: "937312e0-2354-11eb-9f10-fbc30a62cf39",
@@ -131,12 +147,20 @@ pub fn init_advertising(hci: HciConnector<BleConnector>) -> bool {
 
 	let mut rng = bleps::no_rng::NoRng;
 	let mut srv = AttributeServer::new(&mut ble, &mut gatt_attributes, &mut rng);
+	let mut is_connection_succesful = None;
 	loop {
-		if is_password_written.get() && is_ssid_written.get() {
-			NotificationData::new(device_configured_handle, b"true\0\0\0\0");
-			return true;
+		let mut notification_data = None;
+		// unwrap is safe because we just assigned the value
+		if is_password_written.get() && is_ssid_written.get() && is_connection_succesful.is_none() {
+			is_connection_succesful = Some(connect_to_wifi(controller, wifi_stack));
+			if is_connection_succesful.unwrap() {
+				notification_data = Some(NotificationData::new(
+					device_configured_handle,
+					b"true\0\0\0\0",
+				));
+			}
 		}
-		match srv.do_work() {
+		match srv.do_work_with_notification(notification_data) {
 			Ok(x) => {
 				if x == WorkResult::GotDisconnected {
 					break;
@@ -146,6 +170,17 @@ pub fn init_advertising(hci: HciConnector<BleConnector>) -> bool {
 				println!("{:?}", e);
 			}
 		};
+		if let Some(connected) = is_connection_succesful {
+			if connected {
+				if is_config_conifrmed.get() {
+					return true;
+				}
+			} else {
+				is_config_conifrmed.set(false);
+				is_ssid_written.set(false);
+				is_password_written.set(false);
+			}
+		}
 	}
 	false
 }
