@@ -1,7 +1,7 @@
 use core::{
 	cell::Cell,
 	cmp::max,
-	ops::{Add, AddAssign, Sub},
+	ops::{Add, Sub},
 };
 
 use alloc::vec;
@@ -10,7 +10,7 @@ use bleps::{
 	ad_structure::{
 		create_advertising_data, AdStructure, BR_EDR_NOT_SUPPORTED, LE_GENERAL_DISCOVERABLE,
 	},
-	attribute_server::{AttributeServer, WorkResult},
+	attribute_server::{AttributeServer, NotificationData, WorkResult},
 	gatt, Ble, HciConnector,
 };
 use embedded_io::blocking::Write;
@@ -87,6 +87,16 @@ pub fn init_advertising(hci: HciConnector<BleConnector>) -> bool {
 		data.write(&secret).unwrap();
 		344 - offset
 	};
+	let mut notify_configured = |offset: usize, mut data: &mut [u8]| {
+		// let secret = get_device_secret(&mut fs);
+		// data.write(&secret).unwrap();
+		let mut buf = b"false\0\0\0";
+		if true {
+			buf = b"true\0\0\0\0";
+		}
+		data.write(buf).unwrap();
+		8 - offset
+	};
 	gatt!([service {
 		uuid: "937312e0-2354-11eb-9f10-fbc30a62cf38",
 		characteristics: [
@@ -99,6 +109,12 @@ pub fn init_advertising(hci: HciConnector<BleConnector>) -> bool {
 				name: "Device_Secret",
 				uuid: "987312e0-2354-11eb-9f10-fbc30a62cf38",
 				read: read_secret,
+			},
+			characteristic {
+				name: "device_configured",
+				uuid: "987312e0-2354-11eb-9f10-fbc30a62cf50",
+				notify: true,
+				read: notify_configured
 			},
 			characteristic {
 				uuid: "937312e0-2354-11eb-9f10-fbc30a62cf39",
@@ -115,9 +131,9 @@ pub fn init_advertising(hci: HciConnector<BleConnector>) -> bool {
 
 	let mut rng = bleps::no_rng::NoRng;
 	let mut srv = AttributeServer::new(&mut ble, &mut gatt_attributes, &mut rng);
-
 	loop {
 		if is_password_written.get() && is_ssid_written.get() {
+			NotificationData::new(device_configured_handle, b"true\0\0\0\0");
 			return true;
 		}
 		match srv.do_work() {

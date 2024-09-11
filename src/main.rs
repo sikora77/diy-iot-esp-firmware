@@ -19,7 +19,7 @@ use esp_backtrace as _;
 use anyhow::anyhow;
 use bleps::HciConnector;
 use embedded_storage::ReadStorage;
-use esp_hal::gpio::{Input, Io, Level, Output};
+use esp_hal::gpio::{Io, Level, Output};
 use esp_hal::prelude::*;
 use esp_hal::system::SystemControl;
 use esp_hal::{analog::dac::Dac2, clock::ClockControl, peripherals::Peripherals, rng::Rng};
@@ -97,10 +97,6 @@ fn main() -> ! {
 	let mut fs = FlashStorage::new();
 
 	let ip_env: &str = core::env!("IP");
-	let is_configured_env = match core::option_env!("IS_CONFIGURED") {
-		Some(val) => val.parse::<bool>().expect("Invalid IS_CONFIGURED value"),
-		None => false,
-	};
 	let debug_env: bool = match core::option_env!("DEBUG") {
 		Some(val) => val.parse::<bool>().expect("Invalid DEBUG value"),
 		None => false,
