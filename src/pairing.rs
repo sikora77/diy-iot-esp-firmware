@@ -10,6 +10,7 @@ use bleps::{
 	ad_structure::{
 		create_advertising_data, AdStructure, BR_EDR_NOT_SUPPORTED, LE_GENERAL_DISCOVERABLE,
 	},
+	att::Uuid,
 	attribute_server::{AttributeServer, NotificationData, WorkResult},
 	gatt, Ble, HciConnector,
 };
@@ -26,31 +27,18 @@ use esp_wifi::{
 
 use crate::{
 	utils::{connect_to_wifi, get_device_secret},
-	PASS_ADDR, SSID_ADDR,
+	CONFIG_ADDR, PASS_ADDR, SSID_ADDR,
 };
 
 #[allow(non_snake_case)]
-pub fn init_advertising(
-	hci: &HciConnector<BleConnector>,
+pub fn init_advertising<'a>(
+	hci: &'a HciConnector<BleConnector<'a>>,
 	controller: &mut WifiController,
 	wifi_stack: &WifiStack<WifiStaDevice>,
 ) -> bool {
 	let mut fs = FlashStorage::new();
 
-	println!("Begin bluetooth stuff");
-	let mut ble = Ble::new(hci);
-	ble.init().unwrap();
-	ble.cmd_set_le_advertising_parameters().unwrap();
-	ble.cmd_set_le_advertising_data(
-		create_advertising_data(&[
-			AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
-			AdStructure::ServiceUuids16(&[Uuid::Uuid16(0x1809)]),
-			AdStructure::CompleteLocalName("Fancy lights"),
-		])
-		.unwrap(),
-	)
-	.unwrap();
-	ble.cmd_set_le_advertise_enable(true).unwrap();
+	let mut ble = init_bluetooth(hci);
 	println!("Started advertising");
 
 	let mut read_id = |offset: usize, mut data: &mut [u8]| {
@@ -154,6 +142,7 @@ pub fn init_advertising(
 		if is_password_written.get() && is_ssid_written.get() && is_connection_succesful.is_none() {
 			is_connection_succesful = Some(connect_to_wifi(controller, wifi_stack));
 			if is_connection_succesful.unwrap() {
+				println!("Notifying the app");
 				notification_data = Some(NotificationData::new(
 					device_configured_handle,
 					b"true\0\0\0\0",
@@ -163,7 +152,7 @@ pub fn init_advertising(
 		match srv.do_work_with_notification(notification_data) {
 			Ok(x) => {
 				if x == WorkResult::GotDisconnected {
-					break;
+					// break;
 				}
 			}
 			Err(e) => {
@@ -173,6 +162,8 @@ pub fn init_advertising(
 		if let Some(connected) = is_connection_succesful {
 			if connected {
 				if is_config_conifrmed.get() {
+					let config_bytes = [0u8; 4];
+					fs.write(CONFIG_ADDR, &config_bytes).unwrap();
 					return true;
 				}
 			} else {
@@ -182,7 +173,24 @@ pub fn init_advertising(
 			}
 		}
 	}
-	false
+}
+
+fn init_bluetooth<'a>(hci: &'a HciConnector<BleConnector<'a>>) -> Ble<'a> {
+	println!("Begin bluetooth stuff");
+	let mut ble = Ble::new(hci);
+	ble.init().unwrap();
+	ble.cmd_set_le_advertising_parameters().unwrap();
+	ble.cmd_set_le_advertising_data(
+		create_advertising_data(&[
+			AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
+			AdStructure::ServiceUuids16(&[Uuid::Uuid16(0x1809)]),
+			AdStructure::CompleteLocalName("Fancy lights"),
+		])
+		.unwrap(),
+	)
+	.unwrap();
+	ble.cmd_set_le_advertise_enable(true).unwrap();
+	ble
 }
 
 fn handle_write(

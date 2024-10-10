@@ -8,7 +8,7 @@ extern crate alloc;
 use alloc::format;
 use core::mem::MaybeUninit;
 use core::str;
-use utils::{get_device_id, get_wifi_config};
+use utils::{get_device_id, get_device_secret, get_wifi_config};
 
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -102,7 +102,6 @@ fn main() -> ! {
 	};
 	println!(core::env!("PORT"));
 	// Line currently required for DEVICE_SECRET to appear as a string
-	println!("{}", DEVICE_SECRET);
 
 	let port_env: u16 = core::env!("PORT")
 		.parse::<u16>()
@@ -110,7 +109,14 @@ fn main() -> ! {
 	init_heap();
 	let device_id_bytes = get_device_id(&mut fs);
 	let device_id = str::from_utf8(&device_id_bytes).unwrap();
+	println!("{}", device_id);
+
 	// Device secret is 344 bytes long
+	let device_secret_bytes = get_device_secret(&mut fs);
+	// Converting with utf-8 resulted in errors in printable characters
+	let device_secret = device_secret_bytes.as_ascii().unwrap().as_str();
+	println!("{}", device_secret);
+	println!("{:?}", device_secret_bytes);
 
 	init_logger(log::LevelFilter::Info);
 

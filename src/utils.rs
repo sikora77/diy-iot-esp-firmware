@@ -120,8 +120,6 @@ pub fn connect_to_wifi(
 			controller,
 			wifi_stack,
 		) {
-			let config_bytes = [0u8; 4];
-			fs.write(CONFIG_ADDR, &config_bytes).unwrap();
 			return true;
 		}
 	}
