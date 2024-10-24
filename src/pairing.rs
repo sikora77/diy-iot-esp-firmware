@@ -26,7 +26,7 @@ use esp_wifi::{
 };
 
 use crate::{
-	utils::{connect_to_wifi, get_device_secret},
+	utils::{connect_to_wifi, get_device_id, get_device_secret},
 	CONFIG_ADDR, PASS_ADDR, SSID_ADDR,
 };
 
@@ -42,7 +42,8 @@ pub fn init_advertising<'a>(
 	println!("Started advertising");
 
 	let mut read_id = |offset: usize, mut data: &mut [u8]| {
-		let id_bytes = crate::DEVICE_ID.as_bytes();
+		let mut fs = FlashStorage::new();
+		let id_bytes = get_device_id(&mut fs);
 		// Need to write from offset to end, sometimes we can't transmit the entire message
 		data.write(&id_bytes[offset..]).unwrap();
 		crate::DEVICE_ID.len() - offset
@@ -83,7 +84,7 @@ pub fn init_advertising<'a>(
 
 	let mut read_secret = |offset: usize, mut data: &mut [u8]| {
 		let secret = get_device_secret(&mut fs);
-		data.write(&secret).unwrap();
+		data.write(&secret[offset..]).unwrap();
 		344 - offset
 	};
 	let mut notify_configured_read = |offset: usize, mut data: &mut [u8]| {
