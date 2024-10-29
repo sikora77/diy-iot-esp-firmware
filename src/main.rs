@@ -56,6 +56,7 @@ pub struct LightState {
 	pub is_on: bool,
 	pub brightness: u8,
 	pub color: i32,
+	pub removed:bool,
 }
 
 #[global_allocator]
