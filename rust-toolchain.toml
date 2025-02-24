@@ -1,4 +1,5 @@
 [toolchain]
+# I need to use 1.80 or something like that cuz they messed up macros after that
 channel = "esp"
 components = ["rustfmt", "rustc-dev"]
 targets = ["xtensa-esp32-none-elf"]

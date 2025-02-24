@@ -46,7 +46,8 @@ pub fn init_advertising<'a>(
 		let id_bytes = get_device_id(&mut fs);
 		// Need to write from offset to end, sometimes we can't transmit the entire message
 		data.write(&id_bytes[offset..]).unwrap();
-		crate::DEVICE_ID.len() - offset
+		// 36 is the length of serialized uuidv4
+		36 - offset
 	};
 	let mut ssid_buf: [u8; 128] = [0u8; 128];
 	let mut ssid_offset: usize = 0;
