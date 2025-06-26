@@ -1,30 +1,108 @@
 use core::str;
 
-use crate::errors::{PasswordFlashError, SSIDFlashError};
-use crate::{CONFIG_ADDR, ID_ADDR, PASS_ADDR, SECRET_ADDR, SSID_ADDR};
-use alloc::borrow::ToOwned;
+use crate::{CONFIG_ADDR, ID_ADDR,  SECRET_ADDR};
 use alloc::boxed::Box;
-use alloc::string::String;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 use anyhow::anyhow;
-use blocking_network_stack::Stack;
-use core::error::Error;
+use bleps::HciConnector;
 use embedded_storage::{ReadStorage, Storage};
 use esp_backtrace as _;
+use esp_hal::clock::CpuClock;
+use esp_hal::peripherals::{DAC2, GPIO2, GPIO26, GPIO4};
 use esp_hal::rng::Rng;
 use esp_hal::system::software_reset;
 use esp_hal::time;
+use esp_hal::timer::timg::TimerGroup;
 use esp_println::println;
 use esp_storage::FlashStorage;
-use esp_wifi::wifi::{ClientConfiguration, Configuration, WifiController, WifiDevice};
+use esp_wifi::ble::controller::BleConnector;
+use esp_wifi::init;
+use esp_wifi::wifi::{  WifiController, WifiDevice};
+use smoltcp::iface::Interface;
+use smoltcp::wire::{IpAddress, Ipv4Address};
 
-const MAX_CONNECTION_TRIES: u8 = 5;
+pub fn init_hardware<'a>() -> (Rng, HciConnector<BleConnector<'static>>, WifiController<'static>, Interface, WifiDevice<'a>, GPIO26<'a>, GPIO2<'a>, GPIO4<'a>, DAC2<'a>) {
+    let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
+    let peripherals = esp_hal::init(config);
+    let rng = Rng::new(peripherals.RNG);
+    let timg0 = TimerGroup::new(peripherals.TIMG0);
+    // Will leak memory if used more than once
+    let esp_wifi_ctrl = Box::leak(Box::new(init(timg0.timer0, rng, peripherals.RADIO_CLK).unwrap()));
+    let connector = BleConnector::new(esp_wifi_ctrl, peripherals.BT);
+    let hci = HciConnector::new(connector, now);
+    let (mut controller, interfaces) =
+        esp_wifi::wifi::new(esp_wifi_ctrl, peripherals.WIFI).unwrap();
+
+    let mut device = interfaces.sta;
+    let iface = create_interface(&mut device);
+    let gpio26 = peripherals.GPIO26;
+    let gpio2 = peripherals.GPIO2;
+    let gpio4 = peripherals.GPIO4;
+    let dac2 = peripherals.DAC2;
+    controller
+        .set_power_saving(esp_wifi::config::PowerSaveMode::None)
+        .unwrap();
+    ( rng, hci, controller, iface,device,gpio26,gpio2,gpio4,dac2)
+}
+pub fn actual_ip(ip: &str) -> [u8; 4] {
+    let vec: Vec<u8> = ip
+        .split('.')
+        .map(|num| match num.to_string().parse::<u8>() {
+            Err(_) => {
+                panic!("Ip address is wrong");
+            }
+            Ok(x) => x,
+        })
+        .collect();
+    vec.as_slice().try_into().unwrap()
+}
+pub fn get_env() -> (u16,IpAddress , bool) {
+    let ip_env: &str = env!("IP");
+    let debug_env: bool = match option_env!("DEBUG") {
+        Some(val) => val.parse::<bool>().expect("Invalid DEBUG value"),
+        None => false,
+    };
+    println!(env!("PORT"));
+    // Line currently required for DEVICE_SECRET to appear as a string
+
+    let port: u16 = env!("PORT")
+        .parse::<u16>()
+        .expect("PORT is not a valid port");
+    let ip_address_bytes = actual_ip(ip_env);
+    let ip_address = IpAddress::Ipv4(Ipv4Address::new(
+        ip_address_bytes[0],
+        ip_address_bytes[1],
+        ip_address_bytes[2],
+        ip_address_bytes[3],
+    ));
+    (port, ip_address, debug_env)
+}
+pub fn get_device_data(fs: &mut FlashStorage) -> (String, String) {
+    let device_id_bytes = get_device_id(fs);
+    let device_id = str::from_utf8(&device_id_bytes).unwrap();
+    println!("{}", device_id);
+
+    // Device secret is 344 bytes long
+    let device_secret_bytes = get_device_secret(fs);
+    // Converting with utf-8 resulted in errors in printable characters
+    let device_secret = device_secret_bytes.as_ascii().unwrap().as_str();
+    println!("{}", device_secret);
+    (String::from(device_id), String::from(device_secret))
+}
+pub fn is_device_configured(fs: &mut FlashStorage) -> bool {
+    let mut config_bytes = [255u8; 4];
+    fs.read(CONFIG_ADDR, &mut config_bytes).unwrap();
+    config_bytes == [0, 0, 0, 0]
+}
+
 pub fn now() -> u64 {
     time::Instant::now().duration_since_epoch().as_millis()
 }
-pub fn create_interface(device: &mut esp_wifi::wifi::WifiDevice) -> smoltcp::iface::Interface {
+pub fn create_interface(device: &mut WifiDevice) -> Interface {
     // users could create multiple instances but since they only have one WifiDevice
     // they probably can't do anything bad with that
-    smoltcp::iface::Interface::new(
+    Interface::new(
         smoltcp::iface::Config::new(smoltcp::wire::HardwareAddress::Ethernet(
             smoltcp::wire::EthernetAddress::from_bytes(&device.mac_address()),
         )),
@@ -34,113 +112,12 @@ pub fn create_interface(device: &mut esp_wifi::wifi::WifiDevice) -> smoltcp::ifa
 }
 fn timestamp() -> smoltcp::time::Instant {
     smoltcp::time::Instant::from_micros(
-        esp_hal::time::Instant::now()
+        time::Instant::now()
             .duration_since_epoch()
             .as_micros() as i64,
     )
 }
-pub struct WifiConfig {
-    pub ssid: String,
-    pub password: String,
-}
-pub fn init_wifi(
-    ssid: &str,
-    password: &str,
-    controller: &mut WifiController,
-    wifi_stack: &Stack<WifiDevice>,
-) -> bool {
-    let client_config = Configuration::Client(ClientConfiguration {
-        ssid: String::from(ssid),
-        password: String::from(password),
-        ..Default::default()
-    });
-    let res = controller.set_configuration(&client_config);
-    println!("wifi_set_configuration returned {:?}", res);
-    let mut connection_tries = 0;
-    controller.start().unwrap();
-    println!("is wifi started: {:?}", controller.is_started());
-    println!("wifi_connect {:?}", controller.connect());
 
-    // wait to get connected
-    println!("Wait to get connected");
-    loop {
-        let res = controller.is_connected();
-        match res {
-            Ok(connected) => {
-                if connected {
-                    break;
-                }
-            }
-            Err(err) => {
-                println!("{:?}", err);
-                connection_tries += 1;
-                if connection_tries > MAX_CONNECTION_TRIES {
-                    return false;
-                }
-            }
-        }
-    }
-    println!("{:?}", controller.is_connected());
-
-    // wait for getting an ip address
-    println!("Wait to get an ip address");
-    loop {
-        wifi_stack.work();
-        // println!("got ip {:?}", wifi_stack.get_ip_info());
-        if wifi_stack.is_iface_up() {
-            println!("got ip {:?}", wifi_stack.get_ip_info());
-            break;
-        }
-    }
-    true
-}
-pub fn get_wifi_config() -> Result<WifiConfig, Box<dyn Error>> {
-    let mut ssid_buf: [u8; 128] = [0u8; 128];
-    let mut fs = FlashStorage::new();
-    // This reads the SSID
-    fs.read(SSID_ADDR, &mut ssid_buf).unwrap();
-    // TODO convert to UTF-8
-
-    let ssid_result = str::from_utf8(&ssid_buf);
-    if ssid_result.is_err() {
-        return Err(SSIDFlashError.into());
-    }
-    let mut password_buf: [u8; 128] = [0u8; 128];
-
-    // This reads the password
-    fs.read(PASS_ADDR, &mut password_buf).unwrap();
-    let pass_result = str::from_utf8(&password_buf);
-    if pass_result.is_err() {
-        return Err(PasswordFlashError.into());
-    }
-    Ok(WifiConfig {
-        ssid: ssid_result.unwrap().trim_matches(char::from(0)).to_owned(),
-        password: pass_result.unwrap().trim_matches(char::from(0)).to_owned(),
-    })
-}
-pub fn connect_to_wifi(controller: &mut WifiController, wifi_stack: &Stack<WifiDevice>) -> bool {
-    let wifi_config_result = get_wifi_config();
-    let mut is_wifi_configured = true;
-    if wifi_config_result.is_err() {
-        is_wifi_configured = false;
-    }
-
-    if is_wifi_configured {
-        let wifi_config = wifi_config_result.unwrap();
-        println!("Wifi config:");
-        println!("SSID: {}", wifi_config.ssid);
-        println!("Password: {}", wifi_config.password);
-        if init_wifi(
-            &wifi_config.ssid,
-            &wifi_config.password,
-            controller,
-            wifi_stack,
-        ) {
-            return true;
-        }
-    }
-    false
-}
 pub fn get_device_id(fs: &mut FlashStorage) -> [u8; 36] {
     let mut buf: [u8; 36] = [0u8; 36];
     // Device ID is 36 bytes long

@@ -4,40 +4,29 @@
 #![no_main]
 extern crate alloc;
 
-use smoltcp::socket::udp::PacketMetadata;
-use alloc::boxed::Box;
-use crate::utils::{create_interface, get_device_id, get_device_secret, get_wifi_config, handle_device_reset, init_wifi};
+use crate::utils::{ get_device_data, get_env, handle_device_reset, init_hardware};
 use alloc::format;
-use alloc::string::{String, ToString};
-use alloc::vec::Vec;
+use alloc::string::{String, };
 use anyhow::anyhow;
-use bleps::HciConnector;
-use blocking_network_stack::{Stack, UdpSocket};
-use embedded_storage::ReadStorage;
+use blocking_network_stack::{Stack, };
 use esp_alloc as _;
 use esp_backtrace as _;
 use esp_hal::gpio::{Input, Level, Output, OutputConfig, Pull};
-use esp_hal::{clock::CpuClock, main, rng::Rng, timer::timg::TimerGroup};
-use esp_hal::peripherals::{Peripherals, DAC2, GPIO2, GPIO26, GPIO4};
+use esp_hal::{ main};
+
 use esp_println::println;
 use esp_storage::FlashStorage;
-use esp_wifi::{ble::controller::BleConnector, init};
-use esp_wifi::wifi::{Interfaces, WifiController, WifiDevice};
 use serde::{Deserialize, Serialize};
-use serde_json::map::Values;
-use smoltcp::wire::Ipv4Address;
-use smoltcp::{
-    iface::{SocketSet, SocketStorage},
-    wire::{DhcpOption, IpAddress},
-};
-use smoltcp::iface::Interface;
 use utils::now;
+use crate::wifi_utils::{  init_stack_sockets, initialize_network_or_pair, setup_udp_socket, setup_udp_socket_params};
+
 esp_bootloader_esp_idf::esp_app_desc!();
 
 mod coap;
 mod errors;
 mod pairing;
 mod utils;
+mod wifi_utils;
 
 const CONFIG_ADDR: u32 = 0x9000;
 const SSID_ADDR: u32 = 0x9080;
@@ -53,59 +42,12 @@ pub struct LightState {
     pub removed: bool,
 }
 
-fn actual_ip(ip: &str) -> [u8; 4] {
-    let vec: Vec<u8> = ip
-        .split('.')
-        .map(|num| match num.to_string().parse::<u8>() {
-            Err(_) => {
-                panic!("Ip address is wrong");
-            }
-            Ok(x) => x,
-        })
-        .collect();
-    vec.as_slice().try_into().unwrap()
-}
-fn get_env() -> (u16,IpAddress , bool) {
-    let ip_env: &str = core::env!("IP");
-    let debug_env: bool = match core::option_env!("DEBUG") {
-        Some(val) => val.parse::<bool>().expect("Invalid DEBUG value"),
-        None => false,
-    };
-    println!(core::env!("PORT"));
-    // Line currently required for DEVICE_SECRET to appear as a string
 
-    let port: u16 = core::env!("PORT")
-        .parse::<u16>()
-        .expect("PORT is not a valid port");
-    let ip_address_bytes = actual_ip(ip_env);
-    let ip_address = IpAddress::Ipv4(Ipv4Address::new(
-        ip_address_bytes[0],
-        ip_address_bytes[1],
-        ip_address_bytes[2],
-        ip_address_bytes[3],
-    ));
-    (port, ip_address, debug_env)
-}
-fn get_device_data(fs: &mut FlashStorage) -> (String, String) {
-    let device_id_bytes = get_device_id(fs);
-    let device_id = str::from_utf8(&device_id_bytes).unwrap();
-    println!("{}", device_id);
-
-    // Device secret is 344 bytes long
-    let device_secret_bytes = get_device_secret(fs);
-    // Converting with utf-8 resulted in errors in printable characters
-    let device_secret = device_secret_bytes.as_ascii().unwrap().as_str();
-    println!("{}", device_secret);
-    (String::from(device_id), String::from(device_secret))
-}
-fn is_device_configured(fs: &mut FlashStorage) -> bool {
-    let mut config_bytes = [255u8; 4];
-    fs.read(CONFIG_ADDR, &mut config_bytes).unwrap();
-    config_bytes == [0, 0, 0, 0]
-}
 #[main]
 fn main() -> ! {
     esp_println::logger::init_logger_from_env();
+    // Looks weird but is apparently necessary
+    esp_alloc::heap_allocator!(#[unsafe(link_section = ".dram2_uninit")] size: 96 * 1024);
     esp_alloc::heap_allocator!(size: 24 * 1024);
 
     let ( mut rng, hci, mut controller, iface,device,gpio26,gpio2,gpio4,dac2) = init_hardware();
@@ -211,77 +153,8 @@ fn main() -> ! {
         };
     }
 }
-struct UdpSocketParamsWrapper {
-    rx_udp_buffer : [u8; 1536],
-    tx_udp_buffer : [u8; 1536],
-    rx_meta : [PacketMetadata; 4],
-    tx_meta : [PacketMetadata; 4],
-}
-fn setup_udp_socket_params<'a>() -> UdpSocketParamsWrapper {
-    let mut wrapper = UdpSocketParamsWrapper {
-        rx_udp_buffer:[0u8; 1536],
-        tx_udp_buffer:[0u8; 1536],
-        rx_meta:[smoltcp::socket::udp::PacketMetadata::EMPTY; 4],
-        tx_meta:[smoltcp::socket::udp::PacketMetadata::EMPTY; 4],
-    };
-    wrapper
-}
-fn setup_udp_socket<'a>(stack:&'a blocking_network_stack::Stack<'a, WifiDevice<'a>>, wrapper: &'a mut UdpSocketParamsWrapper) ->UdpSocket<'a,'a,WifiDevice <'a>> {
-    stack.get_udp_socket(&mut wrapper.rx_meta,&mut wrapper.rx_udp_buffer,&mut wrapper.tx_meta,&mut wrapper.tx_udp_buffer)
-}
 
-fn initialize_network_or_pair(hci: &HciConnector<BleConnector>, mut controller: &mut WifiController, mut fs: &mut FlashStorage, stack: &Stack<WifiDevice>) {
-    if is_device_configured(&mut fs) {
-        let wifi_config = get_wifi_config().unwrap();
-        println!("{}", wifi_config.ssid);
-        println!("{}", wifi_config.password);
-        while !init_wifi(
-            &wifi_config.ssid,
-            &wifi_config.password,
-            &mut controller,
-            &stack,
-        ) {}
-    } else {
-        controller.stop().unwrap();
 
-        while !pairing::init_advertising(&hci, &mut controller, &stack) {}
-    }
-}
 
-fn init_stack_sockets<'a>(socket_set_entries:&'a mut [SocketStorage<'a>; 3]) ->   SocketSet<'a> {
-    let mut socket_set = SocketSet::new(&mut socket_set_entries[..]);
-    let mut dhcp_socket = smoltcp::socket::dhcpv4::Socket::new();
-    // we can set a hostname here (or add other DHCP options)
-    dhcp_socket.set_outgoing_options(&[DhcpOption {
-        kind: 12,
-        data: b"esp-wifi",
-    }]);
-    socket_set.add(dhcp_socket);
-    socket_set
-}
-
-fn init_hardware<'a>() -> (Rng, HciConnector<BleConnector<'static>>, WifiController<'static>, Interface, WifiDevice<'a>, GPIO26<'a>, GPIO2<'a>, GPIO4<'a>, DAC2<'a>) {
-    let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
-    let peripherals = esp_hal::init(config);
-    let mut rng = Rng::new(peripherals.RNG);
-    let timg0 = TimerGroup::new(peripherals.TIMG0);
-    // Will leak memory if used more than once
-    let esp_wifi_ctrl = Box::leak(Box::new(init(timg0.timer0, rng, peripherals.RADIO_CLK).unwrap()));
-    let connector = BleConnector::new(esp_wifi_ctrl, peripherals.BT);
-    let hci = HciConnector::new(connector, now);
-    let (mut controller, interfaces) =
-        esp_wifi::wifi::new(esp_wifi_ctrl, peripherals.WIFI).unwrap();
-
-    let mut device = interfaces.sta;
-    let iface = create_interface(&mut device);
-    let gpio26 = peripherals.GPIO26;
-    let gpio2 = peripherals.GPIO2;
-    let gpio4 = peripherals.GPIO4;
-    let dac2 = peripherals.DAC2;
-    controller
-        .set_power_saving(esp_wifi::config::PowerSaveMode::None)
-        .unwrap();
-    ( rng, hci, controller, iface,device,gpio26,gpio2,gpio4,dac2)
-}
 
 

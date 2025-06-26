@@ -21,12 +21,13 @@ use esp_backtrace as _;
 use esp_println::println;
 // use embedded_io::blocking::Write;
 use crate::{
-    utils::{connect_to_wifi, get_device_id, get_device_secret},
+    utils::{ get_device_id, get_device_secret},
     CONFIG_ADDR, PASS_ADDR, SSID_ADDR,
 };
 use esp_storage::FlashStorage;
 use esp_wifi::wifi::WifiDevice;
 use esp_wifi::{ble::controller::BleConnector, wifi::WifiController};
+use crate::wifi_utils::connect_to_wifi;
 
 #[allow(non_snake_case)]
 pub fn init_advertising<'a>(
