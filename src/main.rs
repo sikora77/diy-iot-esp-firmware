@@ -82,24 +82,22 @@ fn actual_ip(ip: &str) -> [u8; 4] {
         .collect();
     vec.as_slice().try_into().unwrap()
 }
-
-#[entry]
-fn main() -> ! {
-    log::set_max_level(LevelFilter::Debug);
-    let mut fs = FlashStorage::new();
+fn get_env() -> (u16, [u8; 4], bool) {
     let ip_env: &str = core::env!("IP");
     let debug_env: bool = match core::option_env!("DEBUG") {
         Some(val) => val.parse::<bool>().expect("Invalid DEBUG value"),
         None => false,
     };
     println!(core::env!("PORT"));
-    println!(core::env!("PORT"));
     // Line currently required for DEVICE_SECRET to appear as a string
 
-    let port_env: u16 = core::env!("PORT")
+    let port: u16 = core::env!("PORT")
         .parse::<u16>()
         .expect("PORT is not a valid port");
-    init_heap();
+    let ip_address = actual_ip(ip_env);
+    (port, ip_address, debug_env)
+}
+fn get_device_data(mut fs: &mut FlashStorage) -> (String, String) {
     let device_id_bytes = get_device_id(&mut fs);
     let device_id = str::from_utf8(&device_id_bytes).unwrap();
     println!("{}", device_id);
@@ -109,20 +107,27 @@ fn main() -> ! {
     // Converting with utf-8 resulted in errors in printable characters
     let device_secret = device_secret_bytes.as_ascii().unwrap().as_str();
     println!("{}", device_secret);
-    println!("{:?}", device_secret_bytes);
-
+    (String::from(device_id), String::from(device_secret))
+}
+fn is_device_configured(fs: &mut FlashStorage) -> bool {
+    let mut config_bytes = [255u8; 4];
+    fs.read(CONFIG_ADDR, &mut config_bytes).unwrap();
+    config_bytes == [0, 0, 0, 0]
+}
+#[entry]
+fn main() -> ! {
     init_logger(log::LevelFilter::Info);
+    init_heap();
+    let mut fs = FlashStorage::new();
+    let (port_env, ip_address, debug_env) = get_env();
 
-    let ip_address = actual_ip(ip_env);
+    let (device_id, device_secret) = get_device_data(&mut fs);
+    // println!("{:?}", device_secret_bytes);
 
-    // Initializing peripherals and clocks
     let peripherals = Peripherals::take();
 
     let system = SystemControl::new(peripherals.SYSTEM);
-    // let mut peripheral_clock_control = system.peripheral_clock_control;
     let clocks = ClockControl::max(system.clock_control).freeze();
-    // let mut rtc = Rtc::new(peripherals.RTC_CNTL);
-    // rtc.rwdt.disable();
 
     let timer = esp_hal::timer::timg::TimerGroup::new(peripherals.TIMG1, &clocks, None).timer0;
 
@@ -151,22 +156,12 @@ fn main() -> ! {
     let mut digital_pin = Output::new(io.pins.gpio2, Level::Low);
     let mut dac1 = Dac2::new(peripherals.DAC2, analog_pin);
     let dac1_ref = &mut dac1;
-    let mut config_bytes = [255u8; 4];
     let reset_pin = Input::new(io.pins.gpio4, esp_hal::gpio::Pull::Down);
     if reset_pin.is_high() {
         handle_device_reset(&mut fs);
     }
-    // let reset_pin = Input::new(io.pins.gpio18, esp_hal::gpio::Pull::Down);
-    // let reset_level = reset_pin.get_level();
-    // println!("{:?}", reset_level);
-    // if reset_level == Level::High {
-    // 	println!("Resetting the config bytes");
-    // 	fs.write(CONFIG_ADDR, &config_bytes).unwrap()
-    // } else {
-    fs.read(CONFIG_ADDR, &mut config_bytes).unwrap();
-    // }
-    // if config_bytes == [0, 0, 0, 0] {
-    if true {
+
+    if is_device_configured(&mut fs) {
         let wifi_config = get_wifi_config().unwrap();
         println!("{}", wifi_config.ssid);
         println!("{}", wifi_config.password);
