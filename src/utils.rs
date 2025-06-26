@@ -5,9 +5,12 @@ use crate::{CONFIG_ADDR, ID_ADDR, PASS_ADDR, SECRET_ADDR, SSID_ADDR};
 use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
 use alloc::string::String;
+use anyhow::anyhow;
 use core::error::Error;
 use embedded_storage::{ReadStorage, Storage};
 use esp_backtrace as _;
+use esp_hal::clock::Clocks;
+use esp_hal::delay;
 use esp_hal::reset::software_reset;
 use esp_hal::rng::Rng;
 use esp_println::println;
@@ -26,6 +29,7 @@ pub fn init_wifi(
     password: &str,
     controller: &mut WifiController,
     wifi_stack: &WifiStack<WifiStaDevice>,
+    clocks: &Clocks<'_>,
 ) -> bool {
     let client_config = Configuration::Client(ClientConfiguration {
         ssid: ssid.try_into().unwrap(),
@@ -60,12 +64,13 @@ pub fn init_wifi(
         }
     }
     println!("{:?}", controller.is_connected());
+    let delay = delay::Delay::new(clocks);
 
     // wait for getting an ip address
     println!("Wait to get an ip address");
     loop {
         wifi_stack.work();
-        println!("got ip {:?}", wifi_stack.get_ip_info());
+        // println!("got ip {:?}", wifi_stack.get_ip_info());
         if wifi_stack.is_iface_up() {
             println!("got ip {:?}", wifi_stack.get_ip_info());
             break;
@@ -100,6 +105,7 @@ pub fn get_wifi_config() -> Result<WifiConfig, Box<dyn Error>> {
 pub fn connect_to_wifi(
     controller: &mut WifiController,
     wifi_stack: &WifiStack<WifiStaDevice>,
+    clocks: &Clocks<'_>,
 ) -> bool {
     let wifi_config_result = get_wifi_config();
     let mut is_wifi_configured = true;
@@ -117,6 +123,7 @@ pub fn connect_to_wifi(
             &wifi_config.password,
             controller,
             wifi_stack,
+            clocks,
         ) {
             return true;
         }
@@ -143,10 +150,14 @@ pub fn handle_device_reset(fs: &mut FlashStorage) {
     software_reset(); //maybe use software_reset_cpu
 }
 
-pub fn set_random_mac(mut rng: Rng) {
+pub fn set_random_mac(mut rng: Rng) -> Result<(), anyhow::Error> {
     let mut fake_mac: [u8; 6] = [0u8; 6];
-    for i in 0..6 {
-        fake_mac[i] = rng.random() as u8;
+
+    for fake_byte in fake_mac.iter_mut() {
+        *fake_byte = rng.random() as u8;
     }
-    esp_hal::efuse::Efuse::set_mac_address(fake_mac);
+    match esp_hal::efuse::Efuse::set_mac_address(fake_mac) {
+        Ok(()) => Ok(()),
+        Err(_) => Err(anyhow!("Mac error")),
+    }
 }

@@ -8,6 +8,7 @@ extern crate alloc;
 use alloc::format;
 use core::mem::MaybeUninit;
 use core::str;
+use log::LevelFilter;
 use utils::{
     get_device_id, get_device_secret, get_wifi_config, handle_device_reset, set_random_mac,
 };
@@ -17,6 +18,7 @@ use alloc::vec::Vec;
 
 use esp_backtrace as _;
 
+use crate::utils::init_wifi;
 use anyhow::anyhow;
 use bleps::HciConnector;
 use embedded_storage::ReadStorage;
@@ -37,8 +39,6 @@ use smoltcp::{
     iface::SocketStorage,
     wire::{IpAddress, Ipv4Address},
 };
-
-use crate::utils::init_wifi;
 
 mod coap;
 mod errors;
@@ -85,12 +85,14 @@ fn actual_ip(ip: &str) -> [u8; 4] {
 
 #[entry]
 fn main() -> ! {
+    log::set_max_level(LevelFilter::Debug);
     let mut fs = FlashStorage::new();
     let ip_env: &str = core::env!("IP");
     let debug_env: bool = match core::option_env!("DEBUG") {
         Some(val) => val.parse::<bool>().expect("Invalid DEBUG value"),
         None => false,
     };
+    println!(core::env!("PORT"));
     println!(core::env!("PORT"));
     // Line currently required for DEVICE_SECRET to appear as a string
 
@@ -127,14 +129,15 @@ fn main() -> ! {
     // Initializing wifi
     let mut rng = Rng::new(peripherals.RNG);
     let init = initialize(
-        EspWifiInitFor::WifiBle,
+        // EspWifiInitFor::WifiBle,
+        EspWifiInitFor::Wifi,
         timer,
         rng,
         peripherals.RADIO_CLK,
         &clocks,
     )
     .unwrap();
-    set_random_mac(rng);
+    set_random_mac(rng).unwrap();
 
     let wifi = peripherals.WIFI;
 
@@ -162,21 +165,24 @@ fn main() -> ! {
     // } else {
     fs.read(CONFIG_ADDR, &mut config_bytes).unwrap();
     // }
-    if config_bytes == [0, 0, 0, 0] {
+    // if config_bytes == [0, 0, 0, 0] {
+    if true {
         let wifi_config = get_wifi_config().unwrap();
+        println!("{}", wifi_config.ssid);
+        println!("{}", wifi_config.password);
         while !init_wifi(
             &wifi_config.ssid,
             &wifi_config.password,
             &mut controller,
             &wifi_stack,
+            &clocks,
         ) {}
     } else {
         let mut bluetooth = peripherals.BT;
         controller.stop().unwrap();
         let connector = BleConnector::new(&init, &mut bluetooth);
         let hci = HciConnector::new(connector, current_millis);
-        while !pairing::init_advertising(&hci, &mut controller, &wifi_stack) {}
-        // }
+        while !pairing::init_advertising(&hci, &mut controller, &wifi_stack, &clocks) {}
     }
     println!("Start busy loop on main");
 
