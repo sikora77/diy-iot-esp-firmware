@@ -16,34 +16,32 @@ use bleps::{
     no_rng::NoRng,
     Ble, HciConnector,
 };
-use embedded_io::blocking::Write;
+use blocking_network_stack::Stack;
+use embedded_io::Write;
 use embedded_storage::Storage;
 use esp_backtrace as _;
-use esp_hal::{clock::Clocks, delay};
 use esp_println::println;
-use esp_storage::FlashStorage;
-use esp_wifi::{
-    ble::controller::BleConnector,
-    wifi::{WifiController, WifiStaDevice},
-    wifi_interface::WifiStack,
-};
-
+// use embedded_io::blocking::Write;
 use crate::{
     utils::{connect_to_wifi, get_device_id, get_device_secret},
     CONFIG_ADDR, PASS_ADDR, SSID_ADDR,
 };
+use esp_storage::FlashStorage;
+use esp_wifi::wifi::WifiDevice;
+use esp_wifi::{ble::controller::BleConnector, wifi::WifiController};
 
 #[allow(non_snake_case)]
 pub fn init_advertising<'a>(
-    hci: &'a HciConnector<BleConnector<'a>>,
+    hci: &HciConnector<BleConnector<'a>>,
     controller: &mut WifiController,
-    wifi_stack: &WifiStack<WifiStaDevice>,
-    clocks: &Clocks<'_>,
-) -> bool {
+    wifi_stack: &Stack<WifiDevice>,
+) -> bool
+where
+{
     let mut fs = FlashStorage::new();
 
-    let mut ble = init_bluetooth(hci);
-
+    let mut ble = Ble::new(hci);
+    init_bluetooth(&mut ble);
     println!("Started advertising");
 
     let mut read_id = |offset: usize, mut data: &mut [u8]| {
@@ -148,7 +146,7 @@ pub fn init_advertising<'a>(
         // unwrap is safe because we just assigned the value
         if is_password_written.get() && is_ssid_written.get() && is_connection_succesful.is_none() {
             // ble.get_mut().cmd_set_le_advertise_enable(false);
-            is_connection_succesful = Some(connect_to_wifi(controller, wifi_stack, clocks));
+            is_connection_succesful = Some(connect_to_wifi(controller, wifi_stack));
             if is_connection_succesful.unwrap() {
                 println!("Notifying the app");
                 notification_data = Some(NotificationData::new(
@@ -172,6 +170,7 @@ pub fn init_advertising<'a>(
                 if is_config_conifrmed.get() {
                     let config_bytes = [0u8; 4];
                     fs.write(CONFIG_ADDR, &config_bytes).unwrap();
+
                     return true;
                 }
             } else {
@@ -188,9 +187,8 @@ pub fn init_advertising<'a>(
     }
 }
 
-fn init_bluetooth<'a>(hci: &'a HciConnector<BleConnector<'a>>) -> Ble<'a> {
+fn init_bluetooth(ble: &mut Ble) {
     println!("Begin bluetooth stuff");
-    let mut ble = Ble::new(hci);
     ble.init().unwrap();
     ble.cmd_set_le_advertising_parameters().unwrap();
     ble.cmd_set_le_advertising_data(
@@ -203,7 +201,6 @@ fn init_bluetooth<'a>(hci: &'a HciConnector<BleConnector<'a>>) -> Ble<'a> {
     )
     .unwrap();
     ble.cmd_set_le_advertise_enable(true).unwrap();
-    ble
 }
 
 fn handle_write(

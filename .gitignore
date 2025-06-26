@@ -12,3 +12,7 @@ target/
 #
 .env
 .github/*
+Cargo.lock
+.idea/diy-iot-esp-firmware.iml
+.idea/modules.xml
+.idea/vcs.xml

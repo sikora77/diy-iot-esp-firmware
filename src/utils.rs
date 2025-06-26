@@ -6,20 +6,23 @@ use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
 use alloc::string::String;
 use anyhow::anyhow;
+use blocking_network_stack::Stack;
 use core::error::Error;
 use embedded_storage::{ReadStorage, Storage};
+use embedded_svc::wifi::Wifi;
 use esp_backtrace as _;
 use esp_hal::clock::Clocks;
-use esp_hal::delay;
-use esp_hal::reset::software_reset;
 use esp_hal::rng::Rng;
+use esp_hal::system::software_reset;
+use esp_hal::{delay, time};
 use esp_println::println;
 use esp_storage::FlashStorage;
-use esp_wifi::wifi::{ClientConfiguration, Configuration, WifiController, WifiStaDevice};
-use esp_wifi::wifi_interface::WifiStack;
+use esp_wifi::wifi::{ClientConfiguration, Configuration, WifiController, WifiDevice};
 
 const MAX_CONNECTION_TRIES: u8 = 5;
-
+pub fn now() -> u64 {
+    time::Instant::now().duration_since_epoch().as_millis()
+}
 pub struct WifiConfig {
     pub ssid: String,
     pub password: String,
@@ -28,12 +31,11 @@ pub fn init_wifi(
     ssid: &str,
     password: &str,
     controller: &mut WifiController,
-    wifi_stack: &WifiStack<WifiStaDevice>,
-    clocks: &Clocks<'_>,
+    wifi_stack: &Stack<WifiDevice>,
 ) -> bool {
     let client_config = Configuration::Client(ClientConfiguration {
-        ssid: ssid.try_into().unwrap(),
-        password: password.try_into().unwrap(),
+        ssid: String::from(ssid),
+        password: String::from(password),
         ..Default::default()
     });
     let res = controller.set_configuration(&client_config);
@@ -41,7 +43,6 @@ pub fn init_wifi(
     let mut connection_tries = 0;
     controller.start().unwrap();
     println!("is wifi started: {:?}", controller.is_started());
-    println!("{:?}", controller.get_capabilities());
     println!("wifi_connect {:?}", controller.connect());
 
     // wait to get connected
@@ -64,7 +65,6 @@ pub fn init_wifi(
         }
     }
     println!("{:?}", controller.is_connected());
-    let delay = delay::Delay::new(clocks);
 
     // wait for getting an ip address
     println!("Wait to get an ip address");
@@ -102,11 +102,7 @@ pub fn get_wifi_config() -> Result<WifiConfig, Box<dyn Error>> {
         password: pass_result.unwrap().trim_matches(char::from(0)).to_owned(),
     })
 }
-pub fn connect_to_wifi(
-    controller: &mut WifiController,
-    wifi_stack: &WifiStack<WifiStaDevice>,
-    clocks: &Clocks<'_>,
-) -> bool {
+pub fn connect_to_wifi(controller: &mut WifiController, wifi_stack: &Stack<WifiDevice>) -> bool {
     let wifi_config_result = get_wifi_config();
     let mut is_wifi_configured = true;
     if wifi_config_result.is_err() {
@@ -123,7 +119,6 @@ pub fn connect_to_wifi(
             &wifi_config.password,
             controller,
             wifi_stack,
-            clocks,
         ) {
             return true;
         }
