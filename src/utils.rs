@@ -9,12 +9,10 @@ use anyhow::anyhow;
 use blocking_network_stack::Stack;
 use core::error::Error;
 use embedded_storage::{ReadStorage, Storage};
-use embedded_svc::wifi::Wifi;
 use esp_backtrace as _;
-use esp_hal::clock::Clocks;
 use esp_hal::rng::Rng;
 use esp_hal::system::software_reset;
-use esp_hal::{delay, time};
+use esp_hal::time;
 use esp_println::println;
 use esp_storage::FlashStorage;
 use esp_wifi::wifi::{ClientConfiguration, Configuration, WifiController, WifiDevice};
@@ -22,6 +20,24 @@ use esp_wifi::wifi::{ClientConfiguration, Configuration, WifiController, WifiDev
 const MAX_CONNECTION_TRIES: u8 = 5;
 pub fn now() -> u64 {
     time::Instant::now().duration_since_epoch().as_millis()
+}
+pub fn create_interface(device: &mut esp_wifi::wifi::WifiDevice) -> smoltcp::iface::Interface {
+    // users could create multiple instances but since they only have one WifiDevice
+    // they probably can't do anything bad with that
+    smoltcp::iface::Interface::new(
+        smoltcp::iface::Config::new(smoltcp::wire::HardwareAddress::Ethernet(
+            smoltcp::wire::EthernetAddress::from_bytes(&device.mac_address()),
+        )),
+        device,
+        timestamp(),
+    )
+}
+fn timestamp() -> smoltcp::time::Instant {
+    smoltcp::time::Instant::from_micros(
+        esp_hal::time::Instant::now()
+            .duration_since_epoch()
+            .as_micros() as i64,
+    )
 }
 pub struct WifiConfig {
     pub ssid: String,

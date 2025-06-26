@@ -140,7 +140,7 @@ impl<'a, 'b> CoapClient<'a, 'b> {
     ) -> Result<(), anyhow::Error> {
         let resp = self.make_get_request(uri_path, is_confirmable, true, true);
         if resp.is_err() {
-            log!(Level::Debug, "{}", resp.unwrap_err().to_string());
+            log!(Level::Debug, "{}", resp.unwrap_err());
             // println!("{:?}", resp.unwrap_err());
         }
         self.observe(10, response_callback)
@@ -170,7 +170,7 @@ impl<'a, 'b> CoapClient<'a, 'b> {
             // let is_connected = self.controller.is_connected().unwrap();
             // println!("{}", is_connected);
             } else {
-                log!(Level::Debug, "{}", resp.unwrap_err().to_string());
+                log!(Level::Debug, "{}", resp.unwrap_err());
                 // println!();
             }
             if now() > wait_end {

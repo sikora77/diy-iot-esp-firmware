@@ -1,5 +1,5 @@
 use core::{
-    cell::{Cell, RefCell},
+    cell::Cell,
     cmp::max,
     ops::{Add, Sub},
 };
@@ -12,9 +12,7 @@ use bleps::{
     },
     att::Uuid,
     attribute_server::{AttributeServer, NotificationData, WorkResult},
-    gatt,
-    no_rng::NoRng,
-    Ble, HciConnector,
+    gatt, Ble, HciConnector,
 };
 use blocking_network_stack::Stack;
 use embedded_io::Write;
