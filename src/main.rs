@@ -110,7 +110,6 @@ fn main() -> ! {
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
 
-    esp_alloc::heap_allocator!(#[unsafe(link_section = ".dram2_uninit")] size: 96 * 1024);
     esp_alloc::heap_allocator!(size: 24 * 1024);
     let mut fs = FlashStorage::new();
     let (port_env, ip_address, _debug_env) = get_env();
@@ -150,8 +149,9 @@ fn main() -> ! {
     let analog_pin = peripherals.GPIO26;
     let mut digital_pin = Output::new(peripherals.GPIO2, Level::Low, OutputConfig::default());
     // peripherals.DAC2Output::new(io.pins.gpio2, Level::Low);
+    let mut dac1 = esp_hal::analog::dac::Dac::new(peripherals.DAC2, analog_pin);
     // let mut dac1 = Dac2::new(peripherals.DAC2, analog_pin);
-    // let dac1_ref = &mut dac1;
+    let dac1_ref = &mut dac1;
     let reset_pin = Input::new(
         peripherals.GPIO4,
         esp_hal::gpio::InputConfig::default().with_pull(Pull::Down),
@@ -229,12 +229,12 @@ fn main() -> ! {
             // }
             let mut actual_brightness = device_state.brightness;
             actual_brightness /= 5;
-            // dac1_ref.write(200 + actual_brightness);
+            dac1_ref.write(200 + actual_brightness);
             if true {
                 digital_pin.set_high();
             }
         } else {
-            // dac1_ref.write(0);
+            dac1_ref.write(0);
             digital_pin.set_low();
             // if cfg!(debug_assertions) {
             // led.set_low();
