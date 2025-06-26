@@ -16,6 +16,7 @@ use esp_hal::{ main};
 
 use esp_println::println;
 use esp_storage::FlashStorage;
+use esp_wifi::wifi::WifiController;
 use serde::{Deserialize, Serialize};
 use utils::now;
 use crate::wifi_utils::{  init_stack_sockets, initialize_network_or_pair, setup_udp_socket, setup_udp_socket_params};
@@ -52,7 +53,7 @@ fn main() -> ! {
 
     let ( mut rng, hci, mut controller, iface,device,gpio26,gpio2,gpio4,dac2) = init_hardware();
     let mut fs = FlashStorage::new();
-    let (port_env, ip_address, _debug_env) = get_env();
+    let (port_env, ip_address, debug_env) = get_env();
 
     let (device_id, _device_secret) = get_device_data(&mut fs);
 
@@ -64,9 +65,7 @@ fn main() -> ! {
     // It can be left like this for now
     // Initialize and configure the gpio
     let mut digital_pin = Output::new(gpio2, Level::Low, OutputConfig::default());
-    // peripherals.DAC2Output::new(io.pins.gpio2, Level::Low);
     let mut dac1 = esp_hal::analog::dac::Dac::new(dac2, gpio26);
-    // let mut dac1 = Dac2::new(peripherals.DAC2, analog_pin);
     let dac1_ref = &mut dac1;
     let reset_pin = Input::new(
         gpio4,
@@ -82,8 +81,10 @@ fn main() -> ! {
     let mut wrapper= setup_udp_socket_params();
     let mut udp_socket = setup_udp_socket(&stack,&mut wrapper);
 
-    let _msg_id: u16 = 100;
-    let _token: u8 = 0;
+    // TODO This can probably be removed
+    // let _msg_id: u16 = 100;
+    // let _token: u8 = 0;
+
     // Randomize the udp socket port - necessary fo some reason
     let socket_port = u16::try_from(rng.random() % 10000).unwrap()+1000;
     println!("Port on ESP: {}", socket_port);
@@ -113,21 +114,15 @@ fn main() -> ! {
             handle_device_reset(&mut fs);
         }
         if device_state.is_on {
-            // if cfg!(debug_assertions) {
-            // led.set_high();
-            // }
             let mut actual_brightness = device_state.brightness;
             actual_brightness /= 5;
             dac1_ref.write(200 + actual_brightness);
-            if true {
+            if debug_env {
                 digital_pin.set_high();
             }
         } else {
             dac1_ref.write(0);
             digital_pin.set_low();
-            // if cfg!(debug_assertions) {
-            // led.set_low();
-            // }
         }
         println!("{}", payload);
         Ok(())
@@ -141,17 +136,21 @@ fn main() -> ! {
             true,
             observe_callback,
         );
-        match controller.is_connected() {
-            Ok(is_connected) => {
-                if !is_connected {
-                    let _ = controller.connect();
-                }
-            }
-            Err(err) => {
-                println!("Error: {:?}", err);
-            }
-        };
+        reconnect_if_needed(&mut controller);
     }
+}
+
+fn reconnect_if_needed(controller: &mut WifiController) {
+    match controller.is_connected() {
+        Ok(is_connected) => {
+            if !is_connected {
+                let _ = controller.connect();
+            }
+        }
+        Err(err) => {
+            println!("Error: {:?}", err);
+        }
+    };
 }
 
 

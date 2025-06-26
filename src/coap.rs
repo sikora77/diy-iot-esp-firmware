@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 use alloc::{string::ToString, vec};
-use anyhow::anyhow;
+use anyhow::{anyhow, Error};
 use blocking_network_stack::UdpSocket;
 use coap_lite::{CoapOption, ContentFormat, MessageClass, MessageType, Packet, RequestType};
 use esp_println::println;
@@ -28,7 +28,7 @@ impl<'a, 'b> CoapClient<'a, 'b> {
             port,
         }
     }
-    fn handle_response(&mut self, resp: Packet) {
+    fn handle_acknowledgement(&mut self, resp: Packet) {
         let mut packet = Packet::new();
         packet.header.set_type(MessageType::Acknowledgement);
         packet.set_token(resp.get_token().to_vec());
@@ -45,36 +45,37 @@ impl<'a, 'b> CoapClient<'a, 'b> {
         let mut read_bytes = 0;
         let mut message_bytes: Vec<u8> = vec![];
         self.socket.work();
-        // delay.delay_millis(1000);
         log!(Level::Debug, "Receiving");
         loop {
             let mut receive_buffer: [u8; 512] = [0; 512];
             let receive_data = self.socket.receive(&mut receive_buffer);
-            // Wait to receive entire packet and save it in message_bytes
-            if receive_data.is_ok() {
-                let receive_data = receive_data.unwrap();
-                read_bytes += 512;
-                message_bytes.extend_from_slice(&receive_buffer);
-                if read_bytes > receive_data.0 {
-                    message_bytes = message_bytes[0..receive_data.0].to_vec();
-                    let resp = coap_lite::Packet::from_bytes(&message_bytes);
 
-                    if let Ok(resp) = resp {
-                        return Ok(resp);
-                    }
-                    return Err(anyhow::Error::msg("Conversion from bytes to packet failed"));
-                }
-            } else {
-                // let err = receive_data.unwrap_err();
-                // println!("{:?}", err);
+            // Wait to receive entire packet and save it in message_bytes
+            if receive_data.is_err() {
                 return Err(anyhow!("UDP error"));
             }
-            if now() > wait_end {
-                println!("Timeout");
-                return Err(anyhow!("Timeout"));
+            let receive_data = receive_data.unwrap();
+            read_bytes += 512;
+            message_bytes.extend_from_slice(&receive_buffer);
+            if read_bytes > receive_data.0 {
+                message_bytes = message_bytes[0..receive_data.0].to_vec();
+                return match Packet::from_bytes(&message_bytes) {
+                    Ok(resp) => Ok(resp),
+                    Err(_) => Err(anyhow::Error::msg("Conversion from bytes to packet failed")),
+                }
             }
+            Self::check_timeout(wait_end)?;
         }
     }
+
+    fn check_timeout(wait_end: u64) -> Result<(), Error> {
+        if now() > wait_end {
+            println!("Timeout");
+            return Err(anyhow!("Timeout"));
+        }
+        Ok(())
+    }
+
     fn create_get_packet(
         &mut self,
         uri_path: &str,
@@ -158,25 +159,15 @@ impl<'a, 'b> CoapClient<'a, 'b> {
             if resp.is_ok() {
                 let resp = resp.unwrap();
                 println!("Handling observe");
-                /*let callback_error = */
                 response_callback(resp.payload.clone())?;
-                // if callback_error.is_err() {
-                // 	return callback_error;
-                // }
-                self.handle_response(resp);
+                self.handle_acknowledgement(resp);
                 self.msg_id += 1;
 
                 wait_end = now() + timeout * 1000;
-            // let is_connected = self.controller.is_connected().unwrap();
-            // println!("{}", is_connected);
             } else {
                 log!(Level::Debug, "{}", resp.unwrap_err());
-                // println!();
             }
-            if now() > wait_end {
-                println!("Timeout");
-                break;
-            }
+            Self::check_timeout(wait_end)?;
         }
         Ok(())
     }
