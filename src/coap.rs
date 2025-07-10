@@ -62,7 +62,7 @@ impl<'a, 'b> CoapClient<'a, 'b> {
                 return match Packet::from_bytes(&message_bytes) {
                     Ok(resp) => Ok(resp),
                     Err(_) => Err(anyhow::Error::msg("Conversion from bytes to packet failed")),
-                }
+                };
             }
             Self::check_timeout(wait_end)?;
         }
@@ -169,6 +169,5 @@ impl<'a, 'b> CoapClient<'a, 'b> {
             }
             Self::check_timeout(wait_end)?;
         }
-        Ok(())
     }
 }

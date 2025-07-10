@@ -149,7 +149,7 @@ pub fn handle_device_reset(fs: &mut FlashStorage) {
     fs.write(CONFIG_ADDR, &config_bytes).unwrap();
     software_reset(); //maybe use software_reset_cpu
 }
-
+#[allow(dead_code)]
 pub fn set_random_mac(mut rng: Rng) -> Result<(), anyhow::Error> {
     let mut fake_mac: [u8; 6] = [0u8; 6];
 

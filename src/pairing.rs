@@ -1,6 +1,5 @@
 use core::{
     cell::Cell,
-    cell::Cell,
     cmp::max,
     ops::{Add, Sub},
 };
@@ -13,7 +12,7 @@ use bleps::{
     },
     att::Uuid,
     attribute_server::{AttributeServer, NotificationData, WorkResult},
-    gatt, gatt, Ble, Ble, HciConnector, HciConnector,
+    gatt, Ble, HciConnector,
 };
 use blocking_network_stack::Stack;
 use embedded_io::Write;
@@ -146,7 +145,6 @@ where
         // unwrap is safe because we just assigned the value
         if is_password_written.get() && is_ssid_written.get() && is_connection_succesful.is_none() {
             // ble.get_mut().cmd_set_le_advertise_enable(false);
-            is_connection_succesful = Some(connect_to_wifi(controller, wifi_stack));
             is_connection_succesful = Some(connect_to_wifi(controller, wifi_stack));
             if is_connection_succesful.unwrap() {
                 println!("Notifying the app");

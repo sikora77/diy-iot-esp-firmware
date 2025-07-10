@@ -11,8 +11,10 @@ use anyhow::anyhow;
 use blocking_network_stack::Stack;
 use esp_alloc as _;
 use esp_backtrace as _;
+use esp_hal::analog::dac::Dac;
 use esp_hal::gpio::{Input, Level, Output, OutputConfig, Pull};
 use esp_hal::main;
+use esp_hal::peripherals::{DAC2, GPIO2, GPIO26, GPIO4};
 
 use crate::wifi_utils::{
     init_stack_sockets, initialize_network_or_pair, setup_udp_socket, setup_udp_socket_params,
@@ -46,9 +48,28 @@ pub struct LightState {
 }
 
 pub struct ESPGpio<'a> {
-    pub gpio26_dac: Dac2<'a>,
-    pub gpio2: Output<'a, GpioPin<2>>,
-    pub gpio4: Input<'a, GpioPin<4>>,
+    pub gpio26_dac: Dac<'a, DAC2<'a>>,
+    pub gpio2: Output<'a>,
+    pub gpio4: Input<'a>,
+}
+
+fn init_gpio<'a>(
+    gpio2: GPIO2<'a>,
+    dac2: DAC2<'a>,
+    gpio26: GPIO26<'a>,
+    gpio4: GPIO4<'a>,
+) -> ESPGpio<'a> {
+    let digital_pin = Output::new(gpio2, Level::Low, OutputConfig::default());
+    let dac1 = esp_hal::analog::dac::Dac::new(dac2, gpio26);
+    let reset_pin = Input::new(
+        gpio4,
+        esp_hal::gpio::InputConfig::default().with_pull(Pull::Down),
+    );
+    ESPGpio {
+        gpio26_dac: dac1,
+        gpio2: digital_pin,
+        gpio4: reset_pin,
+    }
 }
 
 #[main]
@@ -69,16 +90,9 @@ fn main() -> ! {
 
     let stack = Stack::new(iface, device, socket_set, now, rng.random());
 
-    // It can be left like this for now
-    // Initialize and configure the gpio
-    let mut digital_pin = Output::new(gpio2, Level::Low, OutputConfig::default());
-    let mut dac1 = esp_hal::analog::dac::Dac::new(dac2, gpio26);
-    let dac1_ref = &mut dac1;
-    let reset_pin = Input::new(
-        gpio4,
-        esp_hal::gpio::InputConfig::default().with_pull(Pull::Down),
-    );
-    if reset_pin.is_high() {
+    let mut gpio_pins = init_gpio(gpio2, dac2, gpio26, gpio4);
+
+    if gpio_pins.gpio4.is_high() {
         handle_device_reset(&mut fs);
     }
 
@@ -87,10 +101,6 @@ fn main() -> ! {
 
     let mut wrapper = setup_udp_socket_params();
     let mut udp_socket = setup_udp_socket(&stack, &mut wrapper);
-
-    // TODO This can probably be removed
-    // let _msg_id: u16 = 100;
-    // let _token: u8 = 0;
 
     // Randomize the udp socket port - necessary fo some reason
     let socket_port = u16::try_from(rng.random() % 10000).unwrap() + 1000;
@@ -124,8 +134,8 @@ fn main() -> ! {
                 gpio_pins.gpio2.set_high();
             }
         } else {
-            dac1_ref.write(0);
-            digital_pin.set_low();
+            gpio_pins.gpio26_dac.write(0);
+            gpio_pins.gpio2.set_low();
         }
         println!("{}", payload);
         Ok(())

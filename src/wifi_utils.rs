@@ -1,13 +1,13 @@
 use crate::errors::{PasswordFlashError, SSIDFlashError};
-use crate::utils::{is_device_configured};
+use crate::utils::is_device_configured;
 use crate::{pairing, PASS_ADDR, SSID_ADDR};
 use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
-use alloc::string::{String};
+use alloc::string::String;
+use bleps::HciConnector;
 use blocking_network_stack::{Stack, UdpSocket};
 use core::error::Error;
-use bleps::HciConnector;
-use embedded_storage::{ReadStorage, Storage};
+use embedded_storage::ReadStorage;
 use esp_println::println;
 use esp_storage::FlashStorage;
 use esp_wifi::ble::controller::BleConnector;
@@ -17,7 +17,8 @@ use smoltcp::socket::udp::PacketMetadata;
 use smoltcp::wire::DhcpOption;
 
 const MAX_CONNECTION_TRIES: u8 = 5;
-#[derive(Copy,Clone)]
+#[derive(Copy, Clone)]
+#[allow(clippy::upper_case_acronyms)]
 enum WifiFieldType {
     SSID = SSID_ADDR as isize,
     Password = PASS_ADDR as isize,
@@ -27,14 +28,14 @@ fn read_wifi_field_from_flash(
     field_type: WifiFieldType,
 ) -> Result<String, Box<dyn Error>> {
     let mut ssid_buf: [u8; 128] = [0u8; 128];
-    fs.read(field_type.clone() as u32, &mut ssid_buf).unwrap();
+    fs.read(field_type as u32, &mut ssid_buf).unwrap();
 
     let ssid_result = str::from_utf8(&ssid_buf);
     if ssid_result.is_err() {
         return match field_type {
             WifiFieldType::SSID => Err(SSIDFlashError.into()),
             WifiFieldType::Password => Err(PasswordFlashError.into()),
-        }
+        };
     }
     Ok(ssid_result.unwrap().trim_matches(char::from(0)).to_owned())
 }
@@ -105,34 +106,46 @@ pub fn try_connect_to_network(
 }
 
 pub struct UdpSocketParamsWrapper {
-    rx_udp_buffer : [u8; 1536],
-    tx_udp_buffer : [u8; 1536],
-    rx_meta : [PacketMetadata; 4],
-    tx_meta : [PacketMetadata; 4],
+    rx_udp_buffer: [u8; 1536],
+    tx_udp_buffer: [u8; 1536],
+    rx_meta: [PacketMetadata; 4],
+    tx_meta: [PacketMetadata; 4],
 }
-pub fn setup_udp_socket_params<'a>() -> UdpSocketParamsWrapper {
-    let wrapper = UdpSocketParamsWrapper {
-        rx_udp_buffer:[0u8; 1536],
-        tx_udp_buffer:[0u8; 1536],
-        rx_meta:[PacketMetadata::EMPTY; 4],
-        tx_meta:[PacketMetadata::EMPTY; 4],
-    };
-    wrapper
+pub fn setup_udp_socket_params() -> UdpSocketParamsWrapper {
+    UdpSocketParamsWrapper {
+        rx_udp_buffer: [0u8; 1536],
+        tx_udp_buffer: [0u8; 1536],
+        rx_meta: [PacketMetadata::EMPTY; 4],
+        tx_meta: [PacketMetadata::EMPTY; 4],
+    }
 }
-pub fn setup_udp_socket<'a>(stack:&'a Stack<'a, WifiDevice<'a>>, wrapper: &'a mut UdpSocketParamsWrapper) ->UdpSocket<'a,'a,WifiDevice <'a>> {
-    stack.get_udp_socket(&mut wrapper.rx_meta,&mut wrapper.rx_udp_buffer,&mut wrapper.tx_meta,&mut wrapper.tx_udp_buffer)
+pub fn setup_udp_socket<'a>(
+    stack: &'a Stack<'a, WifiDevice<'a>>,
+    wrapper: &'a mut UdpSocketParamsWrapper,
+) -> UdpSocket<'a, 'a, WifiDevice<'a>> {
+    stack.get_udp_socket(
+        &mut wrapper.rx_meta,
+        &mut wrapper.rx_udp_buffer,
+        &mut wrapper.tx_meta,
+        &mut wrapper.tx_udp_buffer,
+    )
 }
 
-pub fn initialize_network_or_pair(hci: &HciConnector<BleConnector>, mut controller: &mut WifiController, mut fs: &mut FlashStorage, stack: &Stack<WifiDevice>) {
-    if is_device_configured(&mut fs) {
-        while !connect_to_wifi(controller,stack){}
+pub fn initialize_network_or_pair(
+    hci: &HciConnector<BleConnector>,
+    controller: &mut WifiController,
+    fs: &mut FlashStorage,
+    stack: &Stack<WifiDevice>,
+) {
+    if is_device_configured(fs) {
+        while !connect_to_wifi(controller, stack) {}
     } else {
         controller.stop().unwrap();
-        while !pairing::init_advertising(&hci, &mut controller, &stack) {}
+        while !pairing::init_advertising(hci, controller, stack) {}
     }
 }
 
-pub fn init_stack_sockets<'a>(socket_set_entries:&'a mut [SocketStorage<'a>; 3]) ->   SocketSet<'a> {
+pub fn init_stack_sockets<'a>(socket_set_entries: &'a mut [SocketStorage<'a>; 3]) -> SocketSet<'a> {
     let mut socket_set = SocketSet::new(&mut socket_set_entries[..]);
     let mut dhcp_socket = smoltcp::socket::dhcpv4::Socket::new();
     // we can set a hostname here (or add other DHCP options)
