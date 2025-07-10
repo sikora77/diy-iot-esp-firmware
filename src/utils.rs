@@ -1,6 +1,6 @@
 use core::str;
 
-use crate::{CONFIG_ADDR, ID_ADDR,  SECRET_ADDR};
+use crate::{CONFIG_ADDR, ID_ADDR, SECRET_ADDR};
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -18,17 +18,29 @@ use esp_println::println;
 use esp_storage::FlashStorage;
 use esp_wifi::ble::controller::BleConnector;
 use esp_wifi::init;
-use esp_wifi::wifi::{  WifiController, WifiDevice};
+use esp_wifi::wifi::{WifiController, WifiDevice};
 use smoltcp::iface::Interface;
 use smoltcp::wire::{IpAddress, Ipv4Address};
 
-pub fn init_hardware<'a>() -> (Rng, HciConnector<BleConnector<'static>>, WifiController<'static>, Interface, WifiDevice<'a>, GPIO26<'a>, GPIO2<'a>, GPIO4<'a>, DAC2<'a>) {
+pub fn init_hardware<'a>() -> (
+    Rng,
+    HciConnector<BleConnector<'static>>,
+    WifiController<'static>,
+    Interface,
+    WifiDevice<'a>,
+    GPIO26<'a>,
+    GPIO2<'a>,
+    GPIO4<'a>,
+    DAC2<'a>,
+) {
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
     let rng = Rng::new(peripherals.RNG);
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     // Will leak memory if used more than once
-    let esp_wifi_ctrl = Box::leak(Box::new(init(timg0.timer0, rng, peripherals.RADIO_CLK).unwrap()));
+    let esp_wifi_ctrl = Box::leak(Box::new(
+        init(timg0.timer0, rng, peripherals.RADIO_CLK).unwrap(),
+    ));
     let connector = BleConnector::new(esp_wifi_ctrl, peripherals.BT);
     let hci = HciConnector::new(connector, now);
     let (mut controller, interfaces) =
@@ -43,7 +55,9 @@ pub fn init_hardware<'a>() -> (Rng, HciConnector<BleConnector<'static>>, WifiCon
     controller
         .set_power_saving(esp_wifi::config::PowerSaveMode::None)
         .unwrap();
-    ( rng, hci, controller, iface,device,gpio26,gpio2,gpio4,dac2)
+    (
+        rng, hci, controller, iface, device, gpio26, gpio2, gpio4, dac2,
+    )
 }
 pub fn actual_ip(ip: &str) -> [u8; 4] {
     let vec: Vec<u8> = ip
@@ -57,7 +71,7 @@ pub fn actual_ip(ip: &str) -> [u8; 4] {
         .collect();
     vec.as_slice().try_into().unwrap()
 }
-pub fn get_env() -> (u16,IpAddress , bool) {
+pub fn get_env() -> (u16, IpAddress, bool) {
     let ip_env: &str = env!("IP");
     let debug_env: bool = match option_env!("DEBUG") {
         Some(val) => val.parse::<bool>().expect("Invalid DEBUG value"),
@@ -112,9 +126,7 @@ pub fn create_interface(device: &mut WifiDevice) -> Interface {
 }
 fn timestamp() -> smoltcp::time::Instant {
     smoltcp::time::Instant::from_micros(
-        time::Instant::now()
-            .duration_since_epoch()
-            .as_micros() as i64,
+        time::Instant::now().duration_since_epoch().as_micros() as i64
     )
 }
 

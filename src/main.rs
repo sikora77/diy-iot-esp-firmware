@@ -4,22 +4,24 @@
 #![no_main]
 extern crate alloc;
 
-use crate::utils::{ get_device_data, get_env, handle_device_reset, init_hardware};
+use crate::utils::{get_device_data, get_env, handle_device_reset, init_hardware};
 use alloc::format;
-use alloc::string::{String, };
+use alloc::string::String;
 use anyhow::anyhow;
-use blocking_network_stack::{Stack, };
+use blocking_network_stack::Stack;
 use esp_alloc as _;
 use esp_backtrace as _;
 use esp_hal::gpio::{Input, Level, Output, OutputConfig, Pull};
-use esp_hal::{ main};
+use esp_hal::main;
 
+use crate::wifi_utils::{
+    init_stack_sockets, initialize_network_or_pair, setup_udp_socket, setup_udp_socket_params,
+};
 use esp_println::println;
 use esp_storage::FlashStorage;
 use esp_wifi::wifi::WifiController;
 use serde::{Deserialize, Serialize};
 use utils::now;
-use crate::wifi_utils::{  init_stack_sockets, initialize_network_or_pair, setup_udp_socket, setup_udp_socket_params};
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -43,6 +45,11 @@ pub struct LightState {
     pub removed: bool,
 }
 
+pub struct ESPGpio<'a> {
+    pub gpio26_dac: Dac2<'a>,
+    pub gpio2: Output<'a, GpioPin<2>>,
+    pub gpio4: Input<'a, GpioPin<4>>,
+}
 
 #[main]
 fn main() -> ! {
@@ -51,7 +58,7 @@ fn main() -> ! {
     esp_alloc::heap_allocator!(#[unsafe(link_section = ".dram2_uninit")] size: 96 * 1024);
     esp_alloc::heap_allocator!(size: 24 * 1024);
 
-    let ( mut rng, hci, mut controller, iface,device,gpio26,gpio2,gpio4,dac2) = init_hardware();
+    let (mut rng, hci, mut controller, iface, device, gpio26, gpio2, gpio4, dac2) = init_hardware();
     let mut fs = FlashStorage::new();
     let (port_env, ip_address, debug_env) = get_env();
 
@@ -78,25 +85,21 @@ fn main() -> ! {
     initialize_network_or_pair(&hci, &mut controller, &mut fs, &stack);
     println!("Start busy loop on main");
 
-    let mut wrapper= setup_udp_socket_params();
-    let mut udp_socket = setup_udp_socket(&stack,&mut wrapper);
+    let mut wrapper = setup_udp_socket_params();
+    let mut udp_socket = setup_udp_socket(&stack, &mut wrapper);
 
     // TODO This can probably be removed
     // let _msg_id: u16 = 100;
     // let _token: u8 = 0;
 
     // Randomize the udp socket port - necessary fo some reason
-    let socket_port = u16::try_from(rng.random() % 10000).unwrap()+1000;
+    let socket_port = u16::try_from(rng.random() % 10000).unwrap() + 1000;
     println!("Port on ESP: {}", socket_port);
-    
-    if let Err(_err)=udp_socket.bind(socket_port) {
+
+    if let Err(_err) = udp_socket.bind(socket_port) {
         println!("IoError ");
     }
-    let mut coap_client = coap::CoapClient::new(
-        udp_socket,
-        ip_address,
-        port_env,
-    );
+    let mut coap_client = coap::CoapClient::new(udp_socket, ip_address, port_env);
 
     let observe_callback = &mut |payload| {
         let payload = String::from_utf8(payload);
@@ -116,9 +119,9 @@ fn main() -> ! {
         if device_state.is_on {
             let mut actual_brightness = device_state.brightness;
             actual_brightness /= 5;
-            dac1_ref.write(200 + actual_brightness);
+            gpio_pins.gpio26_dac.write(200 + actual_brightness);
             if debug_env {
-                digital_pin.set_high();
+                gpio_pins.gpio2.set_high();
             }
         } else {
             dac1_ref.write(0);
@@ -152,8 +155,3 @@ fn reconnect_if_needed(controller: &mut WifiController) {
         }
     };
 }
-
-
-
-
-
