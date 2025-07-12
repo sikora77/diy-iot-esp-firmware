@@ -5,10 +5,17 @@ authors = ["sikora77 <sikorski.jakubjan@gmail.com>"]
 edition = "2021"
 license = "MIT OR Apache-2.0"
 
+# This removes vscode error about not finding test
+[[bin]]
+name = "diy_iot_esp_firmware"
+path = "src/main.rs"
+test = false
+doctest = false
+bench = false
 
 [dependencies]
 esp-bootloader-esp-idf = "0.1.0"
-esp-hal                = { version = "=1.0.0-beta.1", features = ["esp32", "unstable"] }
+esp-hal = { version = "=1.0.0-beta.1", features = ["esp32", "unstable"] }
 esp-backtrace = { version = "0.16.0", features = [
     "esp32",
     "panic-handler",
@@ -23,7 +30,19 @@ embedded-svc = { version = "0.25.1", default-features = false, features = [] }
 embedded-io = "0.6.1"
 log = "0.4.18"
 blocking-network-stack = { git = "https://github.com/bjoernQ/blocking-network-stack.git", rev = "b3ecefc222d8806edd221f266999ca339c52d34e" }
-smoltcp = { version = "0.12.0", default-features = false, features = ["medium-ethernet", "multicast", "proto-dhcpv4", "proto-dns", "proto-ipv4", "socket-dns", "socket-icmp", "socket-raw", "socket-tcp", "socket-udp", "socket-dhcpv4"] }
+smoltcp = { version = "0.12.0", default-features = false, features = [
+    "medium-ethernet",
+    "multicast",
+    "proto-dhcpv4",
+    "proto-dns",
+    "proto-ipv4",
+    "socket-dns",
+    "socket-icmp",
+    "socket-raw",
+    "socket-tcp",
+    "socket-udp",
+    "socket-dhcpv4",
+] }
 bleps = { git = "https://github.com/bjoernQ/bleps", package = "bleps", rev = "a5148d8ae679e021b78f53fd33afb8bb35d0b62e", features = [
     "async",
     "macros",
